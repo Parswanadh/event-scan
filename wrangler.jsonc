@@ -1,0 +1,45 @@
+{
+  // Cloudflare Worker: barcode attendance scanner for scan.parswanadh.dev
+  // Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "event-scan",
+  "main": "src/index.js",
+  // Newest date supported by the installed workerd binary; see the note in
+  // PROGRESS.md about bumping this only after upgrading wrangler.
+  "compatibility_date": "2026-07-29",
+
+  // Static front-end is served straight from ./public (no bundler, no build step).
+  // run_worker_first sends only /api/* to the Worker script; everything else is
+  // served by the asset layer without invoking the Worker at all.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "event-scan-db",
+      "database_id": "ea2de699-3156-49f4-a2c6-b8722935fefc"
+    }
+  ],
+
+  // Custom domain on the user's existing zone (Free plan).
+  "routes": [
+    {
+      "pattern": "scan.parswanadh.dev",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  "placement": {
+    "mode": "smart"
+  }
+}

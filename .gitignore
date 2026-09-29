@@ -1,0 +1,35 @@
+# Local env / secrets — never commit real values
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Wrangler local state
+.wrangler/
+.wrangler
+
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Local scratch / timer state (session bookkeeping, not part of the app)
+.timer/status.json
+.timer/stdout.log
+.timer/deadline.txt
+.timer/*.pid
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local D1 + export scratch
+*.sqlite
+*.sqlite3
+exports/
+
+# Timer / session bookkeeping — never part of the app
+.timer/
