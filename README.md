@@ -109,16 +109,26 @@ failed attempts are rate limited per IP in D1 (8 per 15 minutes).
 
 ## Known limitations
 
-- The barcode symbology on the sample card was never verified (no decoder was
-  available on the build machine), so Code128/39/93, Codabar, ITF, EAN/UPC, QR,
-  DataMatrix and PDF417 are all enabled, with manual entry as a fallback. The
-  first real scan will settle it — `raw_code` in D1 will show the truth.
+- **The barcode symbology on the sample card is unverified.** The reference
+  *photograph* could not be decoded by either `zxing-cpp` (try-harder, all
+  binarizers, rotation sweep, up to 8× upscaling) or `zbar` — the image is soft
+  enough that the module-width ratios a 1D symbology encodes are destroyed. So
+  Code128/39/93, Codabar, ITF, EAN/UPC, QR, DataMatrix and PDF417 are all
+  enabled, with manual entry as a fallback. The first real scan will settle it:
+  `raw_code` in D1 will show the truth.
+- **The barcode is high-density**, so working distance matters more than usual.
+  The scanner coaches the user ("Move closer — fill the box") after 7 seconds
+  without a read, and points at manual entry after 16.
 - Camera selection is heuristic. Labels are the only reliable signal the web
-  platform exposes, so there is a manual switch button and the `?debug=camera`
-  panel as the escape hatch.
+  platform exposes — and on Android they carry no lens information at all — so
+  there is a manual switch button and the `?debug=camera` panel as the escape
+  hatch.
+- The vendored ZXing is `@zxing/library`'s UMD (global `ZXing`) rather than the
+  maintained `@zxing/browser` build; swapping it is a drop-in future change.
 - No offline queue: a scan needs connectivity, and a failed POST shows a visible,
   retryable error rather than dropping the record silently.
 - No admin UI for editing or deleting individual scans; use the D1 console.
+- Not yet tested on real phone hardware — see `PROGRESS.md`.
 
 See `PROGRESS.md` for the session ledger and
 `docs/superpowers/specs/` for the design rationale.

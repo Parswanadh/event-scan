@@ -42,6 +42,19 @@ an Excel-compatible CSV export.
   `/vendor/zxing.min.js` as the `ZXing` global.
 - The `--local` D1 and the remote D1 are separate databases; the schema had to be
   applied twice, once with `--local` and once with `--remote`.
+- **The barcode is high-density.** The reference photo of the real card was
+  attacked with two independent decoders — `zxing-cpp` (try-harder, all four
+  binarizers, ±10° rotation sweep, 1–8× LANCZOS upscaling, Otsu and adaptive
+  thresholds, and a single-scanline reconstruction that removes vertical blur)
+  and `zbar` via `pyzbar` — and **neither read it**. The band was located
+  correctly and the bars are individually resolvable to the eye (verified by
+  cropping and rendering it), so this is not a cropping error: the photograph is
+  soft enough that module-width *ratios* are destroyed, which is exactly what a
+  width-modulated 1D symbology encodes. Two strong decoders agreeing on "no
+  read" is the evidence; "I could not decode it" alone would not have been.
+  Practical consequence: the dominant field failure will be **standing too far
+  away**, so the scanner now coaches it ("Move closer — fill the box with the
+  barcode" at 7 s, then a tilt/glare hint pointing at manual entry at 16 s).
 
 **Passed / Failed:**
 
@@ -63,9 +76,11 @@ correctly rejected as a duplicate. The test was fixed, not the code.
 
 **Next:**
 
-1. **Scan the real ID card once and read `scans.raw_code` from D1.** The barcode
-   symbology and payload format were never verified — no decoder existed on the
-   build machine. Everything else is defensive around that one unknown. Command:
+1. **Scan the real ID card once and read `scans.raw_code` from D1.** The payload
+   is still unknown: the reference *photograph* could not be decoded (see above),
+   so the symbology and the exact payload string remain unverified. Everything is
+   defensive around that unknown. Scanning with the phone's own camera at close
+   range is a fundamentally better signal than this photo. Command:
    `wrangler d1 execute event-scan-db --remote --command "SELECT reg_no, raw_code, device FROM scans ORDER BY id DESC LIMIT 5"`
 2. Open `https://scan.parswanadh.dev/?debug=camera` on the actual Android phone
    and confirm the highlighted device is the main lens in the venue lighting.
@@ -96,20 +111,36 @@ correctly rejected as a duplicate. The test was fixed, not the code.
 
 ## Known broken / open
 
-- **Unverified: the barcode symbology and payload.** See Next #1. This is the
-  single highest-risk unknown in the build.
+- **Unverified: the barcode symbology and payload.** The reference photograph is
+  undecodable by two independent decoders (see "Found" above), so the symbology
+  and payload string are still unconfirmed. This remains the highest-risk
+  unknown. See Next #1.
 - **Untested on real hardware.** No Android or iOS device was available, so the
   camera behaviour, decode reliability, and touch interactions are verified by
   unit probes and code review only — never on a phone. The `?debug=camera` panel
   exists precisely to close this gap in one tap.
+- **The dense barcode may need a closer working distance than is comfortable**,
+  and the reference photo suggests the printed module width is small. If field
+  testing shows it is still unreliable at close range, the fix is a tighter
+  reticle plus digital zoom via the `zoom` capability (currently unused), not a
+  decoder change.
 - **`data_matrix` / `pdf417` native formats** are requested from
   `BarcodeDetector` but are not in ZXing's `POSSIBLE_FORMATS` list here; a QR or
   DataMatrix ID card would decode natively on Android but fall back to the
   generic ZXing path elsewhere.
+- **The vendored ZXing is `@zxing/library`'s UMD (global `ZXing`), not
+  `@zxing/browser`'s.** The research lane flagged the former as the legacy
+  browser layer. It works — `BrowserMultiFormatReader` and
+  `decodeFromVideoElementContinuously` were both confirmed present at runtime
+  and are what the code uses — but `@zxing/browser@0.1.5/umd/zxing-browser.min.js`
+  (global `ZXingBrowser`) is the maintained equivalent and a sensible future swap.
 - **No offline queue.** A scan requires connectivity; a failed POST shows a
   retryable error rather than queueing.
 - **No UI for editing or deleting scans.** Corrections currently need the D1
   console.
 - **`not_found_handling: "none"`** means a mistyped URL returns a bare 404 with
   no branded page. Deliberate — SPA fallback would have masked typo'd asset
-  paths as `200 index.html`, which is far harder to debug.
+  paths as `200 index.html`, which is far harder to debug. A `404.html` plus
+  `"404-page"` would be the friendlier upgrade.
+- **`.timer/` is git-ignored**, so the deadline timer and the scratch decode
+  artifacts under `.timer/scan/` are not in the repository.

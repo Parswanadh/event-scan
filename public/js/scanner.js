@@ -34,6 +34,21 @@ const ZXING_INTERVAL_MS = 180;
 /** Same payload twice inside this window is treated as one scan. */
 const HIT_DEBOUNCE_MS = 2500;
 
+/**
+ * Coaching timings.
+ *
+ * The ID cards in use carry a HIGH-DENSITY barcode — a narrow module is a small
+ * fraction of a millimetre — so the dominant failure is simply being too far
+ * away for the module width to survive the sensor. Both zxing-cpp and zbar
+ * failed to read the reference photograph of a real card even with try-harder,
+ * every binarizer, rotation and upscaling: soft focus destroys the module-width
+ * ratios. Distance and sharpness are therefore the things worth telling the
+ * user about, in that order.
+ */
+const HINT_CLOSER_MS = 7000;
+const HINT_TILT_MS = 16000;
+
+
 export function nativeFormats() {
   const Detector = globalThis.BarcodeDetector;
   if (!Detector) return [];
@@ -57,12 +72,35 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
   let engineName = 'idle';
   let camLabel = '';
   let forcedDeviceId = '';
+  let hintTimers = [];
 
   const setStatus = (text, tone) => onStatus?.(text, tone);
   const setEngine = (name) => {
     engineName = name;
     onEngine?.(name);
   };
+
+  function clearHints() {
+    for (const t of hintTimers) clearTimeout(t);
+    hintTimers = [];
+  }
+
+  /**
+   * Two escalating hints. The first addresses distance (the real problem with a
+   * dense symbol); the second addresses glare and angle, and points at the
+   * manual field so a bad card is never a dead end.
+   */
+  function scheduleHints() {
+    clearHints();
+    hintTimers.push(setTimeout(() => {
+      if (!running || paused || attempts > 2) return;
+      setStatus('Move closer — fill the box with the barcode');
+    }, HINT_CLOSER_MS));
+    hintTimers.push(setTimeout(() => {
+      if (!running || paused) return;
+      setStatus('Still reading… try tilting the card to kill glare, or use manual entry');
+    }, HINT_TILT_MS));
+  }
 
   function accept(value, format, via) {
     const raw = String(value ?? '');
@@ -74,6 +112,7 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
 
     lastHit = { value: regNo, at: now };
     paused = true; // stop feeding the same card in thirty times a second
+    clearHints();
     onResult?.({ raw, regNo, format: format || 'unknown', via });
     return true;
   }
@@ -232,6 +271,7 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
       if (!running) return;
 
       setStatus('Point the camera at the barcode');
+      scheduleHints();
 
       const usingNative = await initNative();
       if (usingNative) {
@@ -258,6 +298,7 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
       lastHit = { value: '', at: 0 };
       if (!running) return;
       setStatus('Point the camera at the barcode');
+      scheduleHints();
       if (detector && !nativeTimer) nativeTimer = setTimeout(nativeTick, NATIVE_INTERVAL_MS);
       if (!zxingReader && globalThis.ZXing && Date.now() - startedAt > ZXING_GRACE_MS) startZXing();
     },
@@ -269,6 +310,7 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
     stop() {
       running = false;
       paused = true;
+      clearHints();
       if (nativeTimer) clearTimeout(nativeTimer);
       if (zxingTimer) clearTimeout(zxingTimer);
       nativeTimer = null;
@@ -304,6 +346,7 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
           lastHit = { value: '', at: 0 };
           if (detector) nativeTimer = setTimeout(nativeTick, NATIVE_INTERVAL_MS);
           if (globalThis.ZXing) startZXing();
+          scheduleHints();
         }
         setStatus(`Switched to ${camLabel}`);
         return true;
