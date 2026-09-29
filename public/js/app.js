@@ -38,18 +38,21 @@ const el = {
   manualForm: $('manualForm'),
   manualInput: $('manualInput'),
 
+  confirmHero: $('confirmHero'),
   confirmRegNo: $('confirmRegNo'),
   confirmRaw: $('confirmRaw'),
   eventName: $('eventName'),
   eventList: $('eventList'),
+  statusBanner: $('statusBanner'),
+  statusTitle: $('statusTitle'),
+  statusSub: $('statusSub'),
+  dirToggle: $('dirToggle'),
+  dirInMeta: $('dirInMeta'),
+  dirOutMeta: $('dirOutMeta'),
+  dirHint: $('dirHint'),
+  periodChips: $('periodChips'),
+  periodHint: $('periodHint'),
   hoursOut: $('hoursOut'),
-  periodRuler: $('periodRuler'),
-  rulerFill: $('rulerFill'),
-  handleStart: $('handleStart'),
-  handleEnd: $('handleEnd'),
-  periodTicks: $('periodTicks'),
-  periodFrom: $('periodFrom'),
-  periodTo: $('periodTo'),
   confirmError: $('confirmError'),
   btnSubmit: $('btnSubmit'),
 
@@ -59,12 +62,10 @@ const el = {
   resultSub: $('resultSub'),
   resultFacts: $('resultFacts'),
   btnScanNext: $('btnScanNext'),
-  btnForce: $('btnForce'),
 
   dashStats: $('dashStats'),
   statStudents: $('statStudents'),
-  statScans: $('statScans'),
-  statHours: $('statHours'),
+  statInside: $('statInside'),
   dashSearch: $('dashSearch'),
   btnRefresh: $('btnRefresh'),
   btnExport: $('btnExport'),
@@ -84,8 +85,11 @@ const state = {
   eventName: getEventName() || 'General',
   pending: null, // { raw, regNo, format, via }
   lastResult: null,
-  periodStart: 1,
-  periodEnd: 3,
+  periods: new Set(), // selected period numbers, 1..8
+  direction: 'in', // 'in' | 'out' — what the next submit will record
+  status: null, // last /api/status response for the scanned card
+  minGapMinutes: 40, // replaced by /api/config on load
+  forceNext: false, // set when the server refused and a second tap overrides
   scanCount: 0,
 };
 
@@ -158,115 +162,134 @@ async function releaseAwake() {
   wakeLock = null;
 }
 
-/* ------------------------------------------------------------ period ruler */
+/* ------------------------------------------------------- periods & direction */
 
-function renderRuler() {
-  const { periodStart: s, periodEnd: e } = state;
-  const slot = 100 / 8;
-  const center = (p) => (p - 0.5) * slot;
-
-  el.handleStart.style.left = `${center(s)}%`;
-  el.handleEnd.style.left = `${center(e)}%`;
-  el.handleStart.textContent = String(s);
-  el.handleEnd.textContent = String(e);
-  el.handleStart.setAttribute('aria-valuenow', String(s));
-  el.handleEnd.setAttribute('aria-valuenow', String(e));
-
-  el.rulerFill.style.left = `${(s - 1) * slot}%`;
-  el.rulerFill.style.width = `${(e - s + 1) * slot}%`;
-
-  [...el.periodTicks.children].forEach((tick, i) => {
-    const p = i + 1;
-    tick.classList.toggle('is-active', p >= s && p <= e);
-    tick.classList.toggle('is-edge', p === s || p === e);
-  });
-
-  const hours = e - s + 1;
-  el.hoursOut.textContent = `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
-  el.periodFrom.textContent = String(s);
-  el.periodTo.textContent = String(e);
-}
-
-function buildTicks() {
-  el.periodTicks.innerHTML = '';
+/**
+ * Period selection: eight independent chips, tap to toggle.
+ *
+ * This replaced a two-handle range slider. Tapping is simpler one-handed — the
+ * operator is holding an ID card in the other hand — and it is strictly more
+ * expressive: P1+P2+P5 is representable, which a range never was.
+ */
+function buildPeriodChips() {
+  el.periodChips.innerHTML = '';
   for (let p = 1; p <= 8; p++) {
-    const t = document.createElement('span');
-    t.className = 'ticks__tick';
-    t.textContent = String(p);
-    el.periodTicks.appendChild(t);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'period';
+    b.dataset.period = String(p);
+    b.textContent = `P${p}`;
+    b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', () => {
+      if (state.periods.has(p)) state.periods.delete(p);
+      else state.periods.add(p);
+      renderPeriods();
+    });
+    el.periodChips.appendChild(b);
   }
 }
 
-function periodFromPointer(clientX) {
-  const rect = el.periodRuler.getBoundingClientRect();
-  const ratio = (clientX - rect.left) / rect.width;
-  return Math.min(8, Math.max(1, Math.round(ratio * 8 + 0.5)));
+function renderPeriods() {
+  for (const b of el.periodChips.children) {
+    const p = Number(b.dataset.period);
+    const on = state.periods.has(p);
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  const n = state.periods.size;
+  el.hoursOut.textContent = `${n} ${n === 1 ? 'hour' : 'hours'}`;
+  el.periodHint.textContent = n
+    ? `Selected ${periodsLabel()} · hours = number of selected periods`
+    : 'Tap the periods this student attended.';
 }
 
-function setupRuler() {
-  let dragging = null;
-
-  const begin = (which) => (event) => {
-    dragging = which;
-    event.preventDefault();
-    event.target.setPointerCapture?.(event.pointerId);
-    el.periodRuler.classList.add('is-dragging');
-  };
-
-  const move = (event) => {
-    if (!dragging) return;
-    const p = periodFromPointer(event.clientX);
-    if (dragging === 'start') {
-      state.periodStart = Math.min(p, state.periodEnd);
-    } else {
-      state.periodEnd = Math.max(p, state.periodStart);
+/** Collapse runs so P1,P2,P3,P4 reads as "P1–P4" rather than four numbers. */
+function periodsLabel(list) {
+  const nums = (list || [...state.periods]).slice().sort((a, b) => a - b);
+  if (!nums.length) return '—';
+  const parts = [];
+  let start = nums[0];
+  let prev = nums[0];
+  for (let i = 1; i <= nums.length; i++) {
+    const cur = nums[i];
+    if (cur !== prev + 1) {
+      parts.push(start === prev ? `P${start}` : `P${start}–P${prev}`);
+      start = cur;
     }
-    renderRuler();
-  };
+    prev = cur;
+  }
+  return parts.join(', ');
+}
 
-  const end = (event) => {
-    if (!dragging) return;
-    dragging = null;
-    el.periodRuler.classList.remove('is-dragging');
-    event.target.releasePointerCapture?.(event.pointerId);
-  };
+/* ------------------------------------------------------------ IN / OUT state */
 
-  el.handleStart.addEventListener('pointerdown', begin('start'));
-  el.handleEnd.addEventListener('pointerdown', begin('end'));
-  el.periodRuler.addEventListener('pointermove', move);
-  el.periodRuler.addEventListener('pointerup', end);
-  el.periodRuler.addEventListener('pointercancel', end);
+const DIR_LABEL = { in: 'IN', out: 'OUT' };
 
-  // Tapping the track jumps the nearest handle there — much easier one-handed
-  // than hitting a 40 px circle while holding an ID card.
-  el.periodRuler.addEventListener('click', (event) => {
-    if (event.target === el.handleStart || event.target === el.handleEnd) return;
-    if (el.periodRuler.classList.contains('is-dragging')) return;
-    const p = periodFromPointer(event.clientX);
-    if (Math.abs(p - state.periodStart) <= Math.abs(p - state.periodEnd)) {
-      state.periodStart = Math.min(p, state.periodEnd);
-    } else {
-      state.periodEnd = Math.max(p, state.periodStart);
-    }
-    renderRuler();
-  });
+function timeOnly(stamp) {
+  const m = /(\d{2}:\d{2})/.exec(String(stamp || ''));
+  return m ? m[1] : '—';
+}
 
-  const key = (which) => (event) => {
-    const delta = event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 1
-      : event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 0;
-    if (!delta) return;
-    event.preventDefault();
-    if (which === 'start') {
-      state.periodStart = Math.min(8, Math.max(1, Math.min(state.periodStart + delta, state.periodEnd)));
-    } else {
-      state.periodEnd = Math.min(8, Math.max(1, Math.max(state.periodEnd + delta, state.periodStart)));
-    }
-    renderRuler();
-  };
-  el.handleStart.addEventListener('keydown', key('start'));
-  el.handleEnd.addEventListener('keydown', key('end'));
+function selectDirection(dir, { userChosen = false } = {}) {
+  state.direction = dir;
+  for (const b of el.dirToggle.children) {
+    const on = b.dataset.dir === dir;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  if (userChosen) el.dirHint.textContent = 'manual override';
+  const label = DIR_LABEL[dir];
+  el.confirmHero.textContent = `Mark ${label}`;
+  if (!state.forceNext) el.btnSubmit.textContent = `Record ${label}`;
+}
 
-  renderRuler();
+/**
+ * Show what the server says about this student's current presence, and arm the
+ * direction it implies. The organizer can always override with the toggle.
+ */
+function renderStatus(st) {
+  state.status = st;
+  state.forceNext = false;
+  const banner = el.statusBanner;
+  banner.classList.remove('status--in', 'status--out', 'status--new', 'status--warn');
+
+  const mins = st.minutes;
+  const minsText = mins === null || mins === undefined ? '' : `${mins} min`;
+  const since = st.state === 'in' && st.open
+    ? timeOnly(st.open.scanned_at_local || st.open.scanned_at)
+    : null;
+
+  if (st.state === 'new') {
+    banner.classList.add('status--new');
+    el.statusTitle.textContent = 'First scan for this event';
+    el.statusSub.textContent = 'Nothing recorded yet — this will be an IN.';
+  } else if (st.state === 'in') {
+    banner.classList.add(st.too_soon ? 'status--warn' : 'status--in');
+    el.statusTitle.textContent = st.too_soon
+      ? `Already IN · only ${minsText} ago`
+      : `Currently IN · ${minsText}`;
+    el.statusSub.textContent = `since ${since}${st.periods ? ` · marked ${st.periods}` : ''}`;
+  } else {
+    banner.classList.add('status--out');
+    el.statusTitle.textContent = 'Currently OUT';
+    el.statusSub.textContent = st.last
+      ? `last scanned ${timeOnly(st.last.scanned_at_local || st.last.scanned_at)}`
+      : 'no previous session';
+  }
+
+  // Only one direction is ever legal, but the toggle stays visible so the
+  // operator can see why and force the other one deliberately.
+  const inOpt = el.dirToggle.querySelector('[data-dir="in"]');
+  const outOpt = el.dirToggle.querySelector('[data-dir="out"]');
+  inOpt.disabled = st.state === 'in';
+  outOpt.disabled = st.state !== 'in';
+  el.dirInMeta.textContent = st.state === 'in' ? 'already in' : 'arrival';
+  el.dirOutMeta.textContent = st.state === 'in' ? (minsText || 'departure') : 'needs an IN';
+
+  selectDirection(st.suggest || 'in');
+  el.dirHint.textContent = st.too_soon
+    ? `under ${state.minGapMinutes} min — OUT will ask to confirm`
+    : 'tap to override';
 }
 
 /* ------------------------------------------------------------------- flows */
@@ -309,18 +332,45 @@ async function startScanner() {
   }
 }
 
-function handleScanResult({ raw, regNo, format, via }) {
+/**
+ * A card was read. Before showing the confirm screen, ask the server what this
+ * student's current presence is, because that decides whether this scan is an
+ * arrival or a departure.
+ */
+async function handleScanResult({ raw, regNo, format, via }) {
   state.pending = { raw, regNo, format, via };
+  state.forceNext = false;
   el.confirmRegNo.value = regNo;
   el.confirmRaw.textContent = raw && raw !== regNo
     ? `raw barcode: ${raw.length > 60 ? `${raw.slice(0, 60)}…` : raw} · ${format} · ${via}`
     : `read via ${via} · ${format}`;
   showError(el.confirmError, '');
   el.eventName.value = state.eventName || 'General';
-  state.periodStart = 1;
-  state.periodEnd = 3;
-  renderRuler();
+
+  // Nothing is preselected: the periods are a deliberate choice, not a default.
+  state.periods.clear();
+  renderPeriods();
+
+  el.statusBanner.classList.remove('status--in', 'status--out', 'status--new', 'status--warn');
+  el.statusTitle.textContent = 'Checking current status…';
+  el.statusSub.textContent = '';
+  selectDirection('in');
+  el.btnSubmit.disabled = true;
+
   showView('confirm');
+
+  try {
+    const st = await api.status(regNo, state.eventName);
+    renderStatus(st);
+  } catch (err) {
+    // A status lookup failure must not block recording — assume a fresh arrival
+    // and let the server arbitrate, since it re-checks the same rule on write.
+    el.statusTitle.textContent = 'Status unavailable';
+    el.statusSub.textContent = err.message || 'will be decided when you record';
+    selectDirection('in');
+  } finally {
+    el.btnSubmit.disabled = false;
+  }
 }
 
 function localStamp(date = new Date()) {
@@ -344,6 +394,10 @@ async function submitScan({ force = false } = {}) {
   state.eventName = el.eventName.value.trim() || 'General';
   setEventName(state.eventName);
 
+  const usingForce = force || state.forceNext === true;
+  const dir = state.direction;
+  const periods = [...state.periods].sort((a, b) => a - b);
+
   el.btnSubmit.disabled = true;
   el.btnSubmit.textContent = 'Recording…';
 
@@ -352,54 +406,81 @@ async function submitScan({ force = false } = {}) {
       reg_no: regNo,
       raw_code: state.pending?.raw || '',
       event_name: state.eventName,
-      scan_type: 'check-in',
-      period_start: state.periodStart,
-      period_end: state.periodEnd,
+      direction: dir,
+      periods,
       scanned_at: new Date().toISOString(),
       scanned_at_local: localStamp(),
       device: scanner?.getState?.().camera || navigator.userAgent.slice(0, 80),
-    }, { force });
+    }, { force: usingForce });
 
+    state.forceNext = false;
     state.scanCount++;
     state.lastResult = res;
-    renderResult(res, { force });
+    renderResult(res);
     showView('done');
   } catch (err) {
+    state.forceNext = false;
+    // The server owns the IN/OUT rule. When it refuses, say exactly why and
+    // offer the deliberate override rather than silently retrying.
     if (err.status === 409) {
-      const existing = err.payload?.existing || {};
-      renderResult(
-        { ...existing, reg_no: regNo, duplicate: true },
-        { duplicate: true },
-      );
-      showView('done');
+      // Re-render the status FIRST: renderStatus() clears forceNext, so the
+      // override flag must be set after it. Setting it before meant the
+      // "record anyway" button never appeared and the next tap simply repeated
+      // the same refused request — caught by the headless UI test.
+      if (err.payload?.state) renderStatus({ ...err.payload, suggest: err.payload.suggest || dir });
+
+      if (err.code === 'too_soon') {
+        state.forceNext = true;
+        showError(
+          el.confirmError,
+          `${err.detail || 'Too soon to mark OUT'}. Tap again to record OUT anyway.`,
+        );
+      } else if (err.code === 'already_in') {
+        showError(el.confirmError, `Already marked IN ${err.payload?.minutes ?? ''} min ago. Nothing to record.`);
+      } else if (err.code === 'no_open_session') {
+        showError(el.confirmError, 'No open IN to close — mark them IN instead.');
+      } else {
+        showError(el.confirmError, err.message || 'The server rejected this scan.');
+      }
     } else {
       showError(el.confirmError, err.message || 'Could not record the scan.');
     }
   } finally {
     el.btnSubmit.disabled = false;
-    el.btnSubmit.textContent = 'Record attendance';
+    if (state.forceNext) el.btnSubmit.textContent = `Record ${DIR_LABEL[state.direction]} anyway`;
+    else el.btnSubmit.textContent = `Record ${DIR_LABEL[state.direction]}`;
   }
 }
 
-function renderResult(res, { force = false, duplicate = false } = {}) {
-  const hours = res.hours ?? (state.periodEnd - state.periodStart + 1);
-  const isDupe = duplicate || res.duplicate;
+function renderResult(res) {
+  const dir = res.direction || state.direction;
+  const hours = res.hours ?? state.periods.size;
+  const label = DIR_LABEL[dir] || 'IN';
+  const isOut = dir === 'out';
 
-  el.resultBox.classList.toggle('is-warn', Boolean(isDupe));
-  el.resultMark.textContent = isDupe ? '!' : '✓';
-  el.resultTitle.textContent = isDupe ? 'Already recorded' : 'Recorded';
-  el.resultSub.textContent = isDupe
-    ? 'This card was scanned a moment ago for the same event.'
+  el.resultBox.classList.toggle('is-warn', false);
+  el.resultMark.textContent = isOut ? '←' : '→';
+  el.resultTitle.textContent = `Marked ${label}`;
+  el.resultSub.textContent = isOut && res.session_minutes != null
+    ? `Session length ${res.session_minutes} min`
     : `${state.scanCount} scan${state.scanCount === 1 ? '' : 's'} this session`;
 
-  const when = res.scanned_at_local || localStamp();
+  const periodsTxt = Array.isArray(res.periods) && res.periods.length
+    ? periodsLabel(res.periods)
+    : (state.periods.size ? periodsLabel([...state.periods]) : '—');
+
   const facts = [
     ['Registration', res.reg_no || el.confirmRegNo.value],
+    ['Direction', label],
     ['Event', state.eventName],
-    ['Periods', res.period_start ? `P${res.period_start} – P${res.period_end}` : '—'],
-    ['Hours', String(hours)],
-    ['Time', when],
+    ['Periods', periodsTxt],
+    ['Hours', hours ? String(hours) : '—'],
+    ['Time', res.scanned_at_local || localStamp()],
   ];
+  if (isOut && res.session_minutes != null) {
+    facts.splice(5, 0, ['Session', `${res.session_minutes} min`]);
+  }
+
   el.resultFacts.innerHTML = '';
   for (const [k, v] of facts) {
     const dt = document.createElement('dt');
@@ -409,8 +490,6 @@ function renderResult(res, { force = false, duplicate = false } = {}) {
     el.resultFacts.append(dt, dd);
   }
 
-  el.btnForce.hidden = !isDupe;
-  el.btnForce.disabled = Boolean(force);
 }
 
 /* --------------------------------------------------------------- dashboard */
@@ -451,9 +530,19 @@ function renderDashList(rows) {
 
     const meta = document.createElement('div');
     meta.className = 'list__meta';
-    meta.textContent = row.period_start
-      ? `P${row.period_start}–P${row.period_end} · ${row.hours}h`
-      : '—';
+    const dirPill = document.createElement('span');
+    dirPill.className = `list__dir list__dir--${row.direction === 'out' ? 'out' : 'in'}`;
+    dirPill.textContent = (row.direction || 'in').toUpperCase();
+    meta.appendChild(dirPill);
+    const detail = document.createElement('span');
+    if (row.direction === 'out' && row.session_minutes != null) {
+      detail.textContent = ` ${row.session_minutes} min`;
+    } else if (row.periods) {
+      detail.textContent = ` ${periodsLabel(String(row.periods).split(',').map(Number))}`;
+    } else {
+      detail.textContent = row.period_start ? ` P${row.period_start}–P${row.period_end}` : '';
+    }
+    meta.appendChild(detail);
 
     const time = document.createElement('time');
     time.className = 'list__time';
@@ -479,8 +568,7 @@ async function loadDashboard({ quiet = false } = {}) {
     ]);
 
     el.statStudents.textContent = String(summary.students ?? 0);
-    el.statScans.textContent = String(summary.scans ?? 0);
-    el.statHours.textContent = String(summary.hours ?? 0);
+    el.statInside.textContent = String(summary.in_now ?? 0);
     renderDashList(list.scans || []);
     el.dashUpdated.textContent = `Updated ${new Date().toLocaleTimeString()} · showing ${list.count} of ${list.total}`;
 
@@ -648,12 +736,21 @@ function wireEvents() {
     }
   });
 
+  el.dirToggle.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-dir]');
+    if (!btn || btn.disabled) return;
+    selectDirection(btn.dataset.dir, { userChosen: true });
+    if (state.forceNext) {
+      state.forceNext = false;
+      showError(el.confirmError, '');
+    }
+  });
+
   el.confirmRegNo.addEventListener('input', () => {
     el.confirmRegNo.value = el.confirmRegNo.value.toUpperCase();
   });
 
   el.btnSubmit.addEventListener('click', () => submitScan());
-  el.btnForce.addEventListener('click', () => submitScan({ force: true }));
 
   el.btnScanNext.addEventListener('click', () => {
     state.pending = null;
@@ -716,10 +813,19 @@ function wireEvents() {
 }
 
 async function init() {
-  buildTicks();
-  setupRuler();
+  buildPeriodChips();
+  renderPeriods();
   wireEvents();
   setSheetState(Boolean(getToken()));
+
+  // The PIN field must not advertise the wrong number of digits, and the
+  // IN->OUT minimum gap is a server rule the UI only reports.
+  api.config().then((cfg) => {
+    const n = Number(cfg.pin_length) || 6;
+    el.pinInput.maxLength = n;
+    el.pinInput.placeholder = '\u2022'.repeat(n);
+    if (cfg.min_gap_minutes) state.minGapMinutes = cfg.min_gap_minutes;
+  }).catch(() => { /* defaults already match the deployment */ });
 
   const params = new URLSearchParams(location.search);
   if (params.get('debug') === 'camera') {

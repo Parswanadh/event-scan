@@ -10,6 +10,7 @@
     "test": "node --test tests/regno.test.js",
     "test:unit": "node --test tests/regno.test.js",
     "test:integration": "bash tests/integration.sh",
+    "test:ui": "node tests/ui.mjs",
     "test:live": "BASE=https://scan.parswanadh.dev PIN=\"$ORGANIZER_PIN\" bash tests/integration.sh",
     "db:local": "wrangler d1 execute event-scan-db --local --file=./schema.sql",
     "db:remote": "wrangler d1 execute event-scan-db --remote --file=./schema.sql",

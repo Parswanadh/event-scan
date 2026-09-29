@@ -573,144 +573,6 @@ a {
   width: 100%;
 }
 
-/* ── 9. Ruler (period range) ───────────────────────────────────────────── */
-
-.ruler {
-  position: relative;
-  height: 54px;
-  margin-top: 1.35rem;
-}
-
-.ruler__track {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  left: 0;
-  height: 6px;
-  transform: translateY(-50%);
-  border-radius: var(--r-pill);
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
-
-.ruler__fill {
-  position: absolute;                /* left/width are set inline by JS (%) */
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 0;
-  border-radius: var(--r-pill);
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent-22);
-}
-
-/* Handles sit at the centre of each eighth ((p - 0.5) * 12.5%), which is
-   exactly where the .ticks columns below are centred. */
-.ruler__handle {
-  position: absolute;
-  top: 50%;
-  left: 0;                           /* left is set inline by JS (%) */
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  color: var(--accent-ink);
-  font-size: var(--t-sm);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  cursor: grab;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.ruler__handle::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 2px;                        /* 40px visible, 44px touch target */
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.5), inset 0 0 0 1px rgb(0 0 0 / 0.18);
-  transition: transform 0.12s ease;
-}
-
-.ruler__handle:active {
-  cursor: grabbing;
-}
-
-.ruler__handle:active::before {
-  transform: scale(0.93);
-}
-
-.ruler__handle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.ruler__handle:focus-visible::before {
-  box-shadow: 0 0 0 4px var(--accent-22), 0 2px 8px rgb(0 0 0 / 0.5);
-}
-
-/* While dragging, the value must track the finger with no easing. */
-.ruler.is-dragging {
-  cursor: grabbing;
-}
-
-.ruler.is-dragging .ruler__fill,
-.ruler.is-dragging .ruler__handle,
-.ruler.is-dragging .ruler__handle::before {
-  transition: none;
-}
-
-.ticks {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  margin-top: 0.3rem;
-}
-
-.ticks__tick {
-  display: grid;
-  justify-items: center;
-  gap: 0.28rem;
-  padding-block: 0.2rem;
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: var(--t-xs);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  transition: color 0.16s ease;
-}
-
-.ticks__tick::before {
-  content: "";
-  width: 1px;
-  height: 5px;
-  background: var(--line-strong);
-  transition: height 0.16s ease, background-color 0.16s ease;
-}
-
-.ticks__tick.is-active {
-  color: var(--muted);
-}
-
-.ticks__tick.is-active::before {
-  background: var(--accent-55);
-}
-
-.ticks__tick.is-edge {
-  color: var(--accent);
-  font-weight: 700;
-}
-
-.ticks__tick.is-edge::before {
-  height: 9px;
-  background: var(--accent);
-}
-
 /* ── 10. Scanner ───────────────────────────────────────────────────────── */
 
 .scanner {
@@ -989,7 +851,7 @@ a {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1408,5 +1270,340 @@ a {
   .reticle__laser {
     top: 50%;
     opacity: 1;
+  }
+}
+
+/* Deleted: §9 — the period ruler and its tick scale, removed in full (track,
+   fill, both drag handles with their :active / :focus-visible / .is-dragging
+   states, and every tick rule). §19's chips replace it; the wide-screen and
+   reduced-motion blocks never referenced it. */
+
+/* ── 18. Direction toggle (IN / OUT) ───────────────────────────────────── */
+
+/* Full-width two-option switch. The track is a sunken bed; the options are
+   equal columns inside it. (--r-md is the file's control radius: 12px.) */
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-height: 52px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+.segmented__opt {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.05rem;
+  min-width: 0;
+  min-height: 0;                     /* the 52px track owns the height */
+  padding: 0.1rem 0.4rem;            /* stretched row: 52 - 2 - 8 = 42px tall */
+  border: 1px solid transparent;
+  border-radius: calc(var(--r-md) - 4px);
+  background: transparent;
+  color: var(--muted);
+  line-height: 1.15;
+  text-align: center;
+  transition: background-color 0.16s ease, border-color 0.16s ease,
+    color 0.16s ease, box-shadow 0.16s ease;
+}
+
+@media (hover: hover) {
+  .segmented__opt:not(.is-active):not([disabled]):hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+
+.segmented__label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--t-base);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Secondary line: inherits the option's colour, dimmed. */
+.segmented__meta {
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: 0.72;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Armed. Accent fill, dark ink, inset shadow: which of IN/OUT is live must be
+   unmistakable — it decides arrival vs departure. */
+.segmented__opt.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22),
+    inset 0 -3px 8px rgb(0 0 0 / 0.22);
+  color: var(--accent-ink);
+}
+
+/* The server can forbid a direction (OUT with no open session). */
+.segmented__opt[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.segmented__opt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* An accent ring on the accent fill would vanish; use the text colour. */
+.segmented__opt.is-active:focus-visible {
+  outline-color: var(--text);
+}
+
+/* ── 19. Period chips (P1-P8) instead of the ruler ─────────────────────── */
+
+.periods {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));  /* 4-up on a 320px phone */
+  gap: 0.35rem;
+}
+
+/* Eight across as soon as a row of chips can hold "P8" without squeezing. */
+@media (min-width: 22.5rem) {
+  .periods {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+.period {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: var(--tap);            /* tap target */
+  padding: 0.3rem 0.15rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 0.16s ease, border-color 0.16s ease,
+    color 0.16s ease, transform 0.1s ease;
+}
+
+@media (hover: hover) {
+  .period:not(.is-active):hover {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+}
+
+.period:active {
+  transform: translateY(1px);
+}
+
+/* Selected: accent wash, accent hairline, accent text, heavier weight — the
+   set of eight must be readable at a glance. */
+.period.is-active {
+  border-color: var(--accent-38);
+  background: var(--accent-12);
+  box-shadow: inset 0 0 0 1px var(--accent-12);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* A period whose hour has already gone: a quiet underline, never louder than
+   selection. */
+.period.is-today::after {
+  content: "";
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 12px;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: var(--r-pill);
+  background: var(--faint);
+  opacity: 0.5;
+}
+
+.period.is-active.is-today::after {
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+.period:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── 20. Status banner (IN / OUT / new / warn) ─────────────────────────── */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+
+.status:first-child {
+  margin-top: 0;                     /* the view already owns the top gap */
+}
+
+.status__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status__body {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.status__title {
+  font-size: var(--t-sm);
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.status__sub {
+  color: var(--muted);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* Currently IN: the accent, plus a slow ring on the dot. */
+.status--in {
+  border-color: var(--accent-38);
+}
+
+.status--in .status__title {
+  color: var(--accent);
+}
+
+.status--in .status__dot {
+  background: var(--accent);
+  animation: status-pulse 2.4s ease-out infinite;
+}
+
+/* Only the ring's spread and alpha move: no layout, no reflow. */
+@keyframes status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-22), 0 0 0 3px var(--accent-12);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgb(232 180 74 / 0), 0 0 0 3px var(--accent-12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(232 180 74 / 0), 0 0 0 3px var(--accent-12);
+  }
+}
+
+/* Currently OUT: neutral, no accent at all. */
+.status--out {
+  border-color: var(--line-strong);
+}
+
+.status--out .status__dot {
+  background: var(--muted);
+  box-shadow: 0 0 0 3px var(--line);
+}
+
+/* Neutral: nothing recorded for this card yet. */
+.status--new .status__dot {
+  background: var(--faint);
+  box-shadow: 0 0 0 3px var(--line);
+}
+
+/* "Marked IN only 12 min ago — too soon." */
+.status--warn {
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
+}
+
+.status--warn .status__title {
+  color: var(--danger-ink);
+}
+
+.status--warn .status__sub {
+  color: var(--danger-ink);
+  opacity: 0.78;
+}
+
+.status--warn .status__dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
+}
+
+/* ── 21. Small additions: list direction pill ──────────────────────────── */
+
+/* IN / OUT pill inside a list row. The base look is IN (app.js writes
+   .list__dir--in); OUT arrives as .list__dir--out, with [data-dir="out"] and
+   .is-out kept as aliases. */
+.list__dir {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--accent-38);
+  border-radius: var(--r-pill);
+  background: var(--accent-12);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  vertical-align: 0.05em;
+  white-space: nowrap;
+}
+
+.list__dir--out,
+.list__dir[data-dir="out"],
+.list__dir.is-out {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+}
+
+/* ── 22. Reduced motion for the new components ─────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* §17 already zeroes every duration; this keeps the dot's static halo. */
+  .status--in .status__dot {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--accent-12);
+  }
+
+  .period:active {
+    transform: none;
   }
 }

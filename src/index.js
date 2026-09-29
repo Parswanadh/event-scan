@@ -28,10 +28,25 @@ const enc = new TextEncoder();
 const AUTH_WINDOW_SEC = 900; // rate-limit window
 const AUTH_MAX_FAILS = 8; // failures per IP per window before 429
 const SESSION_TTL_SEC = 60 * 60 * 12; // organizer session length
-const DUPLICATE_WINDOW_SEC = 300; // same reg + event inside this => 409
+
 const MAX_BODY_BYTES = 64 * 1024;
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
+
+/**
+ * Minimum minutes between marking someone IN and letting a scan mark them OUT.
+ *
+ * The door rule: the first scan of the day is an arrival. A scan 40+ minutes
+ * later is a departure. Anything sooner is almost always the organizer
+ * double-tapping or a student walking back past the desk, so it is refused
+ * unless the client explicitly forces it after showing the organizer the
+ * elapsed time.
+ */
+const MIN_SESSION_MINUTES = 40;
+
+/** Bound in SQL as a literal so the rule is identical everywhere it is reported. */
+const FIRST_PERIOD = 1;
+const LAST_PERIOD = 8;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -176,18 +191,88 @@ function safeIso(value, now = Date.now()) {
   return new Date(now).toISOString();
 }
 
-/** Derive hours from a period range. Authoritative — the client's number is ignored. */
-function derivePeriods(body) {
-  const start = asInt(body.period_start);
-  const end = asInt(body.period_end);
-  if (start === null && end === null) return { start: null, end: null, hours: null };
-  if (start === null || end === null) {
-    throw new HttpError(400, 'incomplete_period_range', 'both period_start and period_end are required');
+/** Derive hours from a period selection. Authoritative — the client's number is ignored. */
+function parsePeriods(body) {
+  let raw = body.periods;
+
+  if (typeof raw === 'string') raw = raw.split(/[^0-9]+/);
+
+  if (Array.isArray(raw)) {
+    // A period outside 1..8 is a client bug, not something to silently drop.
+    for (const v of raw) {
+      const n = asInt(v);
+      if (n !== null && (n < FIRST_PERIOD || n > LAST_PERIOD)) {
+        throw new HttpError(400, 'invalid_periods', `periods must be between ${FIRST_PERIOD} and ${LAST_PERIOD}`);
+      }
+    }
+  } else {
+    raw = [];
   }
-  if (start < 1 || end > 8 || start > end) {
-    throw new HttpError(400, 'invalid_period_range', 'periods must satisfy 1 <= start <= end <= 8');
+
+  const nums = [...new Set(raw.map(asInt).filter((n) => n !== null && n >= FIRST_PERIOD && n <= LAST_PERIOD))]
+    .sort((a, b) => a - b);
+
+  // Accept a range too, so an older client (or a curled request) still works.
+  if (!nums.length && body.periods === undefined) {
+    const start = asInt(body.period_start);
+    const end = asInt(body.period_end);
+    if (start !== null && end !== null) {
+      if (start < FIRST_PERIOD || end > LAST_PERIOD || start > end) {
+        throw new HttpError(400, 'invalid_period_range', `periods must satisfy ${FIRST_PERIOD} <= start <= end <= ${LAST_PERIOD}`);
+      }
+      for (let p = start; p <= end; p++) nums.push(p);
+    }
   }
-  return { start, end, hours: end - start + 1 };
+
+  if (!nums.length) return { periods: [], hours: null };
+  return { periods: nums, hours: nums.length };
+}
+
+/**
+ * Current presence state for one student in one event.
+ *
+ * A student's rows for an event are strictly sequential, so "the latest row"
+ * answers everything: an `in` row means they are currently inside, an `out` row
+ * (or no row) means they are not.
+ */
+async function getState(env, regNo, eventId) {
+  const last = await env.DB
+    .prepare(
+      `SELECT id, direction, scanned_at, scanned_at_local, periods,
+              period_start, period_end, hours
+         FROM scans
+        WHERE reg_no = ? AND event_id = ?
+        ORDER BY id DESC LIMIT 1`,
+    )
+    .bind(regNo, eventId)
+    .first();
+
+  if (!last) {
+    return { state: 'new', open: null, last: null, minutes: null, suggest: 'in' };
+  }
+
+  if (last.direction === 'in') {
+    const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(last.scanned_at)) / 60000));
+    return {
+      state: 'in',
+      open: { ...last, minutes },
+      last,
+      minutes,
+      suggest: 'out',
+      too_soon: minutes < MIN_SESSION_MINUTES,
+      min_gap_minutes: MIN_SESSION_MINUTES,
+    };
+  }
+
+  return { state: 'out', open: null, last, minutes: null, suggest: 'in' };
+}
+
+async function handleStatus(request, env, url) {
+  const regNo = normalizeRegNo(url.searchParams.get('reg_no') ?? '');
+  if (!regNo) throw new HttpError(400, 'missing_reg_no');
+  const event = await ensureEvent(env, url.searchParams.get('event'));
+  const st = await getState(env, regNo, event.id);
+  return json({ ok: true, reg_no: regNo, event: event.name, ...st });
 }
 
 /* ------------------------------------------------------------------- routes */
@@ -252,43 +337,73 @@ async function handleScan(request, env) {
   if (!regNo) return fail(400, 'missing_reg_no', 'no registration number could be read from the scan');
   if (regNo.length < 4) return fail(400, 'invalid_reg_no', 'registration number is too short');
 
-  const { start, end, hours } = derivePeriods(body);
-  const scanType = cleanText(body.scan_type, 24) || 'check-in';
+  const { periods, hours } = parsePeriods(body);
+  const periodStart = periods.length ? periods[0] : null;
+  const periodEnd = periods.length ? periods[periods.length - 1] : null;
   const now = Date.now();
   const scannedAt = safeIso(cleanText(body.scanned_at, 40), now);
   const scannedAtLocal = cleanText(body.scanned_at_local, 40);
   const event = await ensureEvent(env, body.event_name);
   const force = body.force === true;
 
-  if (!force) {
-    const dupe = await env.DB
-      .prepare(
-        `SELECT id, reg_no, hours, period_start, period_end, scanned_at, scanned_at_local
-           FROM scans
-          WHERE reg_no = ? AND event_id = ? AND scanned_at > ?
-          ORDER BY scanned_at DESC LIMIT 1`,
-      )
-      .bind(regNo, event.id, new Date(now - DUPLICATE_WINDOW_SEC * 1000).toISOString())
-      .first();
-    if (dupe) {
+  // ── the IN/OUT state machine ──────────────────────────────────────────────
+  const st = await getState(env, regNo, event.id);
+
+  let direction = cleanText(body.direction, 8)?.toLowerCase() || null;
+  if (direction !== 'in' && direction !== 'out') direction = st.suggest;
+
+  if (direction === 'in' && st.state === 'in') {
+    return json(
+      {
+        ok: false, error: 'already_in',
+        detail: `marked IN ${st.minutes} min ago`,
+        state: 'in', open: st.open, minutes: st.minutes, suggest: 'out',
+      },
+      409,
+    );
+  }
+  if (direction === 'out' && st.state !== 'in') {
+    return json(
+      {
+        ok: false, error: 'no_open_session',
+        detail: 'no open IN to close — mark them IN first',
+        state: st.state, suggest: 'in',
+      },
+      409,
+    );
+  }
+
+  // Closing a session: refuse an implausibly short one unless forced, so a
+  // double-tap at the desk cannot record a zero-minute attendance.
+  let sessionMinutes = null;
+  if (direction === 'out') {
+    sessionMinutes = Math.max(0, Math.round((now - Date.parse(st.open.scanned_at)) / 60000));
+    if (sessionMinutes < MIN_SESSION_MINUTES && !force) {
       return json(
-        { ok: false, error: 'duplicate_scan', detail: 'already scanned recently', existing: dupe },
+        {
+          ok: false, error: 'too_soon',
+          detail: `marked IN only ${sessionMinutes} min ago — ${MIN_SESSION_MINUTES} min minimum`,
+          state: 'in', open: st.open, minutes: sessionMinutes,
+          min_gap_minutes: MIN_SESSION_MINUTES, suggest: 'out',
+        },
         409,
       );
     }
   }
 
+  const scanType = cleanText(body.scan_type, 24) || (direction === 'in' ? 'check-in' : 'check-out');
+
   const res = await env.DB
     .prepare(
       `INSERT INTO scans
-         (reg_no, raw_code, event_id, event_name, scan_type,
-          period_start, period_end, hours,
+         (reg_no, raw_code, event_id, event_name, direction, scan_type,
+          periods, period_start, period_end, hours, session_minutes,
           scanned_at, scanned_at_local, device, ua, note)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .bind(
-      regNo, rawCode, event.id, event.name, scanType,
-      start, end, hours,
+      regNo, rawCode, event.id, event.name, direction, scanType,
+      periods.join(',') || null, periodStart, periodEnd, hours, sessionMinutes,
       scannedAt, scannedAtLocal,
       cleanText(body.device, 120), cleanText(request.headers.get('User-Agent'), 250),
       cleanText(body.note, 250),
@@ -303,9 +418,13 @@ async function handleScan(request, env) {
       valid_reg_no: isValidRegNo(regNo),
       raw_code: rawCode,
       event: event.name,
-      period_start: start,
-      period_end: end,
+      direction,
+      state: direction, // after this write, the student is in this state
+      periods,
+      period_start: periodStart,
+      period_end: periodEnd,
       hours,
+      session_minutes: sessionMinutes,
       scanned_at: scannedAt,
       scanned_at_local: scannedAtLocal,
     },
@@ -343,8 +462,8 @@ async function handleScans(request, env, url) {
 
   const rows = await env.DB
     .prepare(
-      `SELECT s.id, s.reg_no, s.event_name, s.scan_type,
-              s.period_start, s.period_end, s.hours,
+      `SELECT s.id, s.reg_no, s.event_name, s.scan_type, s.direction,
+              s.periods, s.period_start, s.period_end, s.hours, s.session_minutes,
               s.scanned_at, s.scanned_at_local, s.device, r.name
          FROM scans s
          LEFT JOIN roster r ON r.reg_no = s.reg_no
@@ -376,17 +495,50 @@ async function handleSummary(request, env, url) {
       `SELECT COUNT(*) AS scans,
               COUNT(DISTINCT reg_no) AS students,
               COALESCE(SUM(hours), 0) AS hours,
+              COALESCE(SUM(session_minutes), 0) AS session_minutes,
               MAX(scanned_at) AS last_scan
          FROM scans ${clause}`,
     )
     .bind(...binds)
     .first();
 
+  // "Who is inside right now": a student's rows are sequential, so take each
+  // student's newest row and count the ones that are still an open `in`.
+  const insideWhere = eventName ? 'WHERE s.event_name = ?' : '';
+  const inside = await env.DB
+    .prepare(
+      `SELECT COUNT(*) AS in_now
+         FROM (SELECT reg_no, event_id, MAX(id) AS mid
+                 FROM scans ${clause}
+                GROUP BY reg_no, event_id) t
+         JOIN scans s ON s.id = t.mid
+         ${insideWhere} AND s.direction = 'in'`,
+    )
+    .bind(...binds, ...binds)
+    .first();
+
   const events = await env.DB
     .prepare('SELECT name, (SELECT COUNT(*) FROM scans WHERE event_id = events.id) AS scans FROM events ORDER BY name')
     .all();
 
-  return json({ ok: true, ...totals, events: events.results ?? [] });
+  return json({
+    ok: true,
+    ...totals,
+    in_now: inside?.in_now ?? 0,
+    min_gap_minutes: MIN_SESSION_MINUTES,
+    events: events.results ?? [],
+  });
+}
+
+/** Public, non-secret UI hints. The PIN length is not the protection — rate limiting is. */
+function handleConfig(env) {
+  const pin = String(env.ORGANIZER_PIN ?? '');
+  return json({
+    ok: true,
+    pin_length: pin.length || 6,
+    min_gap_minutes: MIN_SESSION_MINUTES,
+    periods: { first: FIRST_PERIOD, last: LAST_PERIOD },
+  });
 }
 
 async function handleEvents(request, env) {
@@ -437,8 +589,8 @@ async function handleExport(request, env, url) {
   const rows = await env.DB
     .prepare(
       `SELECT s.id, s.reg_no, COALESCE(r.name, '') AS name, s.event_name, s.scan_type,
-              s.period_start, s.period_end, s.hours,
-              s.scanned_at, s.scanned_at_local, s.device, s.raw_code
+              s.direction, s.periods, s.period_start, s.period_end, s.hours,
+              s.session_minutes, s.scanned_at, s.scanned_at_local, s.device, s.raw_code
          FROM scans s
          LEFT JOIN roster r ON r.reg_no = s.reg_no
          ${clause}
@@ -448,16 +600,16 @@ async function handleExport(request, env, url) {
     .all();
 
   const header = [
-    'ID', 'Registration No', 'Name', 'Event', 'Type',
-    'Period From', 'Period To', 'Hours',
-    'Scanned At (UTC)', 'Scanned At (Local)', 'Device', 'Raw Barcode',
+    'ID', 'Registration No', 'Name', 'Event', 'Type', 'Direction',
+    'Periods', 'Period From', 'Period To', 'Hours',
+    'Session Minutes', 'Scanned At (UTC)', 'Scanned At (Local)', 'Device', 'Raw Barcode',
   ];
   const lines = [header.join(',')];
   for (const r of rows.results ?? []) {
     lines.push([
-      r.id, r.reg_no, r.name, r.event_name, r.scan_type,
-      r.period_start, r.period_end, r.hours,
-      r.scanned_at, r.scanned_at_local, r.device, r.raw_code,
+      r.id, r.reg_no, r.name, r.event_name, r.scan_type, r.direction,
+      r.periods, r.period_start, r.period_end, r.hours,
+      r.session_minutes, r.scanned_at, r.scanned_at_local, r.device, r.raw_code,
     ].map(csvCell).join(','));
   }
 
@@ -508,6 +660,10 @@ async function route(request, env) {
     }
     case 'POST /api/auth':
       return handleAuth(request, env);
+    case 'GET /api/config':
+      return handleConfig(env);
+    case 'GET /api/status':
+      return handleStatus(request, env, url);
     case 'POST /api/scan':
       return handleScan(request, env);
     case 'GET /api/scans':

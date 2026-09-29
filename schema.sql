@@ -24,10 +24,16 @@ CREATE TABLE IF NOT EXISTS scans (
   raw_code          TEXT,
   event_id          INTEGER REFERENCES events(id),
   event_name        TEXT,
+  -- 'in' opens a presence session, 'out' closes the open one.
+  direction         TEXT NOT NULL DEFAULT 'in' CHECK (direction IN ('in','out')),
   scan_type         TEXT NOT NULL DEFAULT 'check-in',
+  -- Periods are a multi-select of 1..8; `periods` keeps exactly what was ticked
+  -- (so P1+P5 is representable), while start/end are the min/max for reporting.
+  periods           TEXT,
   period_start      INTEGER,
   period_end        INTEGER,
-  hours             REAL,
+  hours             REAL,          -- count of selected periods (claimed attendance)
+  session_minutes   INTEGER,       -- set on an 'out' row: minutes since its 'in'
   scanned_at        TEXT NOT NULL,              -- ISO-8601 UTC, device clock
   scanned_at_local  TEXT,                       -- same instant in venue wall-clock
   device            TEXT,
@@ -39,6 +45,8 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE INDEX IF NOT EXISTS idx_scans_reg_no     ON scans(reg_no);
 CREATE INDEX IF NOT EXISTS idx_scans_scanned_at ON scans(scanned_at);
 CREATE INDEX IF NOT EXISTS idx_scans_event      ON scans(event_id, scanned_at);
+-- The IN/OUT state lookup reads "latest row for this student in this event".
+CREATE INDEX IF NOT EXISTS idx_scans_state      ON scans(reg_no, event_id, id DESC);
 
 -- Failed organizer PIN attempts, for rate limiting. Rows older than the window
 -- are pruned opportunistically on each write, so this table stays tiny.

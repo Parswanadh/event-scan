@@ -73,69 +73,118 @@ assert_eq "protected route with bad token -> 401" "401" "$(code GET /api/scans '
 assert_eq "protected route with token -> 200" "200" "$(code GET /api/scans '' "$TOKEN")"
 assert_eq "export without token -> 401" "401" "$(code GET /api/export.csv)"
 
-# ── 4. scanning ──────────────────────────────────────────────────────────
-echo "· recording a scan"
-# Canonical shape: BL.EN.U4EAC + 2-digit year + 3-digit roll.
+# ── 4. config + status ───────────────────────────────────────────────────
+echo "· public config"
+assert_eq "GET /api/config -> 200" "200" "$(code GET /api/config)"
+assert_contains "config reports the PIN length" '"pin_length":6' "$(body)"
+assert_contains "config reports the IN->OUT gap" '"min_gap_minutes":40' "$(body)"
+
 regno() { printf 'BL.EN.U4EAC24%03d' "$(( (RANDOM % 900) + 100 ))"; }
-REG="$(regno)"
+
+echo "· status on an unknown card"
+NEW="$(regno)"
+assert_eq "GET /api/status -> 200" "200" "$(code GET "/api/status?reg_no=$NEW&event=InOut")"
+assert_contains "unknown card is 'new'" '"state":"new"' "$(body)"
+assert_contains "unknown card suggests IN" '"suggest":"in"' "$(body)"
+assert_eq "status without reg_no -> 400" "400" "$(code GET '/api/status?event=InOut')"
+
+# ── 5. the IN / OUT state machine ────────────────────────────────────────
+echo "· first scan is an IN"
 assert_eq "POST /api/scan -> 201" "201" \
-  "$(code POST /api/scan "{\"reg_no\":\"$REG\",\"raw_code\":\"^$REG~\",\"event_name\":\"Integration\",\"period_start\":1,\"period_end\":3}")"
-assert_contains "hours derived as 3" '"hours":3' "$(body)"
-assert_contains "reg no echoed back" "$REG" "$(body)"
+  "$(code POST /api/scan "{\"reg_no\":\"$NEW\",\"raw_code\":\"^$NEW~\",\"event_name\":\"InOut\",\"periods\":[1,2,5]}")"
+assert_contains "direction is in" '"direction":"in"' "$(body)"
+assert_contains "hours = count of selected periods" '"hours":3' "$(body)"
+assert_contains "reg no echoed back" "$NEW" "$(body)"
 assert_contains "server marks it a valid reg no" '"valid_reg_no":true' "$(body)"
+assert_contains "periods kept verbatim" '"periods":[1,2,5]' "$(body)"
+
+echo "· status now reports them inside"
+assert_eq "GET /api/status -> 200" "200" "$(code GET "/api/status?reg_no=$NEW&event=InOut")"
+assert_contains "state is in" '"state":"in"' "$(body)"
+assert_contains "suggests OUT next" '"suggest":"out"' "$(body)"
+assert_contains "flags too_soon" '"too_soon":true' "$(body)"
+
+echo "· the 40-minute rule"
+assert_eq "immediate OUT -> 409" "409" "$(code POST /api/scan "{\"reg_no\":\"$NEW\",\"event_name\":\"InOut\",\"direction\":\"out\"}")"
+assert_contains "409 explains too_soon" 'too_soon' "$(body)"
+assert_contains "409 carries the elapsed minutes" '"minutes":0' "$(body)"
+assert_eq "second IN while already IN -> 409" "409" "$(code POST /api/scan "{\"reg_no\":\"$NEW\",\"event_name\":\"InOut\",\"direction\":\"in\"}")"
+assert_contains "409 explains already_in" 'already_in' "$(body)"
+
+echo "· forced OUT closes the session"
+assert_eq "POST force OUT -> 201" "201" \
+  "$(code POST /api/scan "{\"reg_no\":\"$NEW\",\"event_name\":\"InOut\",\"direction\":\"out\",\"force\":true}")"
+assert_contains "direction is out" '"direction":"out"' "$(body)"
+assert_contains "session_minutes recorded" '"session_minutes":0' "$(body)"
+
+echo "· after OUT they can come back IN"
+assert_eq "GET /api/status -> 200" "200" "$(code GET "/api/status?reg_no=$NEW&event=InOut")"
+assert_contains "state is out" '"state":"out"' "$(body)"
+assert_contains "suggests IN next" '"suggest":"in"' "$(body)"
+assert_eq "OUT with no open session -> 409" "409" "$(code POST /api/scan "{\"reg_no\":\"$NEW\",\"event_name\":\"InOut\",\"direction\":\"out\"}")"
+assert_contains "409 explains no_open_session" 'no_open_session' "$(body)"
+assert_eq "re-entry IN -> 201" "201" "$(code POST /api/scan "{\"reg_no\":\"$NEW\",\"event_name\":\"InOut\",\"direction\":\"in\",\"periods\":[3]}")"
+
+echo "· an unknown direction is inferred, not trusted"
+INF="$(regno)"
+assert_eq "garbage direction -> 201" "201" \
+  "$(code POST /api/scan "{\"reg_no\":\"$INF\",\"event_name\":\"InOut\",\"direction\":\"sideways\"}")"
+assert_contains "inferred as in" '"direction":"in"' "$(body)"
+
+echo "· period selection"
+assert_eq "periods outside 1-8 -> 400" "400" \
+  "$(code POST /api/scan "{\"reg_no\":\"$(regno)\",\"event_name\":\"InOut\",\"periods\":[1,9]}")"
+assert_contains "400 names invalid_periods" 'invalid_periods' "$(body)"
+assert_eq "non-contiguous periods accepted" "201" \
+  "$(code POST /api/scan "{\"reg_no\":\"$(regno)\",\"event_name\":\"InOut\",\"periods\":[1,2,3,7,8]}")"
+assert_contains "5 selected -> 5 hours" '"hours":5' "$(body)"
+assert_eq "no periods at all -> 201" "201" \
+  "$(code POST /api/scan "{\"reg_no\":\"$(regno)\",\"event_name\":\"InOut\"}")"
+assert_contains "hours null when nothing selected" '"hours":null' "$(body)"
+assert_eq "legacy range still works -> 201" "201" \
+  "$(code POST /api/scan "{\"reg_no\":\"$(regno)\",\"event_name\":\"InOut\",\"period_start\":4,\"period_end\":7}")"
+assert_contains "range P4-P7 -> 4 hours" '"hours":4' "$(body)"
+assert_eq "bad legacy range -> 400" "400" \
+  "$(code POST /api/scan "{\"reg_no\":\"$(regno)\",\"event_name\":\"InOut\",\"period_start\":5,\"period_end\":2}")"
 
 echo "· normalization is server-side too"
 LOWER="$(regno | tr 'A-Z' 'a-z')"
 assert_eq "lowercase + noisy payload -> 201" "201" \
-  "$(code POST /api/scan "{\"reg_no\":\"$LOWER\",\"event_name\":\"Integration\",\"period_start\":2,\"period_end\":2}")"
+  "$(code POST /api/scan "{\"reg_no\":\"$LOWER\",\"event_name\":\"Normalize\"}")"
 assert_contains "normalized to uppercase" "$(echo "$LOWER" | tr 'a-z' 'A-Z')" "$(body)"
-assert_contains "single period -> 1 hour" '"hours":1' "$(body)"
-
-echo "· period range arithmetic"
-H8="$(regno)"
-assert_eq "P1-P8 -> 201" "201" "$(code POST /api/scan "{\"reg_no\":\"$H8\",\"event_name\":\"Ranges\",\"period_start\":1,\"period_end\":8}")"
-assert_contains "P1-P8 -> 8 hours" '"hours":8' "$(body)"
-H4="$(regno)"
-assert_eq "P4-P7 -> 201" "201" "$(code POST /api/scan "{\"reg_no\":\"$H4\",\"event_name\":\"Ranges\",\"period_start\":4,\"period_end\":7}")"
-assert_contains "P4-P7 -> 4 hours" '"hours":4' "$(body)"
 
 echo "· validation"
-assert_eq "empty reg_no -> 400" "400" "$(code POST /api/scan '{"period_start":1,"period_end":2}')"
-assert_eq "period 0 -> 400" "400" "$(code POST /api/scan "{\"reg_no\":\"$REG\",\"period_start\":0,\"period_end\":2}")"
-assert_eq "period 9 -> 400" "400" "$(code POST /api/scan "{\"reg_no\":\"$REG\",\"period_start\":1,\"period_end\":9}")"
-assert_eq "start > end -> 400" "400" "$(code POST /api/scan "{\"reg_no\":\"$REG\",\"period_start\":5,\"period_end\":2}")"
+assert_eq "empty reg_no -> 400" "400" "$(code POST /api/scan '{"periods":[1,2]}')"
 assert_eq "malformed JSON -> 400" "400" "$(code POST /api/scan '{not json')"
-
-echo "· duplicate detection"
-DUP="BL.EN.U4DUPE$$"
-assert_eq "first scan -> 201" "201" "$(code POST /api/scan "{\"reg_no\":\"$DUP\",\"event_name\":\"DupTest\",\"period_start\":1,\"period_end\":2}")"
-assert_eq "immediate rescan -> 409" "409" "$(code POST /api/scan "{\"reg_no\":\"$DUP\",\"event_name\":\"DupTest\",\"period_start\":1,\"period_end\":2}")"
-assert_contains "409 explains itself" 'duplicate_scan' "$(body)"
-assert_eq "force=true overrides -> 201" "201" "$(code POST /api/scan "{\"reg_no\":\"$DUP\",\"event_name\":\"DupTest\",\"period_start\":1,\"period_end\":2,\"force\":true}")"
 
 # ── 5. reading it back ───────────────────────────────────────────────────
 echo "· organizer reads"
 assert_eq "GET /api/scans -> 200" "200" "$(code GET /api/scans '?limit=5' "$TOKEN")"
-assert_contains "list contains our reg no" "$REG" "$(body)"
+assert_contains "list contains our reg no" "$NEW" "$(body)"
 assert_eq "GET /api/summary -> 200" "200" "$(code GET /api/summary '' "$TOKEN")"
 assert_contains "summary has student count" '"students"' "$(body)"
 assert_contains "summary has hours" '"hours"' "$(body)"
+assert_contains "summary counts who is inside" '"in_now"' "$(body)"
+assert_contains "summary reports the gap rule" '"min_gap_minutes":40' "$(body)"
 assert_eq "GET /api/events -> 200" "200" "$(code GET /api/events '' "$TOKEN")"
-assert_contains "events include Integration" 'Integration' "$(body)"
+assert_contains "events include InOut" 'InOut' "$(body)"
 
 echo "· CSV export"
 assert_eq "GET /api/export.csv -> 200" "200" "$(code GET /api/export.csv '' "$TOKEN")"
 CSV="$(body)"
 assert_contains "csv has header" 'Registration No' "$CSV"
-assert_contains "csv has our row" "$REG" "$CSV"
+assert_contains "csv has our row" "$NEW" "$CSV"
 assert_contains "csv has Hours column" 'Hours' "$CSV"
+assert_contains "csv has Direction column" 'Direction' "$CSV"
+assert_contains "csv has Session Minutes column" 'Session Minutes' "$CSV"
+assert_contains "csv has Periods column" 'Periods' "$CSV"
 head -c 3 /tmp/ev-body | od -An -tx1 | grep -q 'ef bb bf' \
   && pass "csv starts with a UTF-8 BOM for Excel" \
   || fail "csv starts with a UTF-8 BOM for Excel" "$(head -c 3 /tmp/ev-body | od -An -tx1)"
 
 echo "· roster"
 assert_eq "POST /api/roster -> 200" "200" \
-  "$(code POST /api/roster "{\"entries\":[{\"reg_no\":\"$REG\",\"name\":\"Integration Test\"}]}" "$TOKEN")"
+  "$(code POST /api/roster "{\"entries\":[{\"reg_no\":\"$NEW\",\"name\":\"Integration Test\"}]}" "$TOKEN")"
 assert_contains "roster name joins into the list" 'Integration Test' "$(code GET /api/scans '?limit=5' "$TOKEN"; body)"
 
 # ── 6. CORS preflight ────────────────────────────────────────────────────

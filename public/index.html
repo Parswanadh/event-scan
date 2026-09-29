@@ -35,8 +35,10 @@
         and exporting the attendance sheet.</p>
 
       <form class="stack" id="pinForm" autocomplete="off">
+        <!-- placeholder and maxlength are set from /api/config so the field
+             always shows as many dots as the PIN actually has -->
         <input class="input input--pin" id="pinInput" type="password" inputmode="numeric"
-               pattern="[0-9]*" maxlength="12" placeholder="••••" aria-label="Organizer PIN" required>
+               pattern="[0-9]*" maxlength="6" placeholder="••••••" aria-label="Organizer PIN" required>
         <p class="error" id="pinError" hidden role="alert"></p>
         <button type="submit" class="btn btn--primary" id="pinSubmit">Unlock</button>
       </form>
@@ -80,15 +82,41 @@
         Tap <strong>Sheet</strong> above to view or export the attendance.</p>
     </section>
 
-    <!-- ── 4. confirm + duration ──────────────────────────────────── -->
+    <!-- ── 4. confirm: IN/OUT + periods ───────────────────────────── -->
     <section class="view" id="view-confirm" data-view="confirm" hidden>
-      <h1 class="hero">Confirm</h1>
+      <h1 class="hero" id="confirmHero">Confirm</h1>
 
       <div class="card card--reg">
         <span class="card__label">Registration number</span>
         <input class="regno" id="confirmRegNo" type="text" autocapitalize="characters"
                spellcheck="false" aria-label="Registration number">
         <span class="card__note" id="confirmRaw"></span>
+      </div>
+
+      <div class="status" id="statusBanner">
+        <span class="status__dot" aria-hidden="true"></span>
+        <div class="status__body">
+          <span class="status__title" id="statusTitle">Checking…</span>
+          <span class="status__sub" id="statusSub"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__head">
+          <span class="card__label">Mark as</span>
+          <span class="hint" id="dirHint">tap to override</span>
+        </div>
+
+        <div class="segmented" id="dirToggle" role="group" aria-label="Direction">
+          <button type="button" class="segmented__opt" data-dir="in" aria-pressed="false">
+            <span class="segmented__label">IN</span>
+            <span class="segmented__meta" id="dirInMeta"></span>
+          </button>
+          <button type="button" class="segmented__opt" data-dir="out" aria-pressed="false">
+            <span class="segmented__label">OUT</span>
+            <span class="segmented__meta" id="dirOutMeta"></span>
+          </button>
+        </div>
       </div>
 
       <div class="card">
@@ -101,19 +129,11 @@
       <div class="card">
         <div class="card__head">
           <span class="card__label">Periods attended</span>
-          <span class="hours" id="hoursOut">3 hours</span>
+          <span class="hours" id="hoursOut">0 hours</span>
         </div>
 
-        <div class="ruler" id="periodRuler" role="group" aria-label="Select period range">
-          <div class="ruler__track"><div class="ruler__fill" id="rulerFill"></div></div>
-          <button type="button" class="ruler__handle" id="handleStart"
-                  role="slider" aria-label="Start period" aria-valuemin="1" aria-valuemax="8" aria-valuenow="1">1</button>
-          <button type="button" class="ruler__handle" id="handleEnd"
-                  role="slider" aria-label="End period" aria-valuemin="1" aria-valuemax="8" aria-valuenow="3">3</button>
-        </div>
-
-        <div class="ticks" id="periodTicks"></div>
-        <p class="hint">P<span id="periodFrom">1</span> – P<span id="periodTo">3</span> · hours are counted inclusively</p>
+        <div class="periods" id="periodChips" role="group" aria-label="Periods attended"></div>
+        <p class="hint" id="periodHint">Tap the periods this student attended.</p>
       </div>
 
       <p class="error" id="confirmError" hidden role="alert"></p>
@@ -136,7 +156,6 @@
 
       <div class="actions">
         <button type="button" class="btn btn--primary btn--lg" id="btnScanNext">Scan next</button>
-        <button type="button" class="btn btn--ghost" id="btnForce" hidden>Record anyway</button>
       </div>
     </section>
 
@@ -144,8 +163,7 @@
     <section class="view" id="view-dash" data-view="dash" hidden>
       <div class="stats" id="dashStats">
         <div class="stat"><span class="stat__value" id="statStudents">—</span><span class="stat__label">students</span></div>
-        <div class="stat"><span class="stat__value" id="statScans">—</span><span class="stat__label">scans</span></div>
-        <div class="stat"><span class="stat__value" id="statHours">—</span><span class="stat__label">hours</span></div>
+        <div class="stat"><span class="stat__value" id="statInside">—</span><span class="stat__label">in now</span></div>
       </div>
 
       <div class="toolbar">

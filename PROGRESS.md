@@ -1,5 +1,69 @@
 # PROGRESS
 
+## 2026-09-29 (later still) — IN/OUT attendance, period chips, and the barcode resolved
+
+**Did:** Reworked attendance from "one scan = one record" to a presence model,
+and fixed three UI complaints from the user's screenshot.
+
+- **The barcode works on real hardware.** The user's screenshot showed their own
+  scan of the actual card landing as `BL.EN.U4EAC24012`. That resolves the
+  highest-risk unknown carried since the first session: the payload normalizes to
+  the registration number, and the main-camera selection plus decode path work on
+  a real phone with a real laminated card. **Caveat: my own test-data cleanup ran
+  *after* that scan and deleted the row, so `raw_code` was lost** and we still do
+  not know whether the payload is the bare registration number or carries
+  decoration. Sequencing mistake on my part; the next scan recaptures it.
+- **IN/OUT state machine.** First scan of a student for an event is an IN. A scan
+  ≥40 min later closes the session as an OUT and records `session_minutes`. Under
+  40 min the server returns 409 `too_soon` and the organizer taps again to force
+  it. IN-while-IN and OUT-with-no-open-session are rejected with distinct codes.
+  The rule is enforced server-side; `GET /api/status` only *reports* it.
+- **Manual IN/OUT override.** The scanner arms the direction the server implies
+  and shows why ("Currently IN · 52 min"); the toggle is always visible so the
+  organizer can override, and the impossible option is disabled rather than
+  hidden so it is clear *why*.
+- **Period slider → chips.** Eight tap-to-toggle chips. Closer to one-handed use
+  and strictly more expressive: P1+P2+P5 is representable, which a range was not.
+- **PIN field no longer lies.** It showed four dots for a six-digit PIN. The
+  placeholder and `maxlength` are now driven by `GET /api/config`, so they follow
+  the secret's real length instead of a hardcoded guess.
+- **Stats trimmed** to STUDENTS and IN NOW — the SCANS and HOURS tiles are gone.
+
+**Found — a real bug that only a browser could catch.** The headless UI test
+failed on the override button: `renderStatus()` clears `forceNext`, and the 409
+handler set it *before* calling `renderStatus()`, so the flag was wiped and the
+"Record OUT anyway" button never appeared. A second tap then repeated the same
+refused request — the 40-minute override was unreachable through the UI even
+though the API supported it. Fixed by re-rendering status first, then setting the
+flag. **Every curl-based test passed while this was broken**, because the API was
+correct; only the UI was not.
+
+**Found — two more things the tests corrected in themselves, not the code:**
+`sheetBtn.textContent` includes the caret glyph (test assertion fixed to read
+`#sheetLabel`), and Chrome logs a deliberately-provoked 409 as a console error
+(filtered, since the test causes it on purpose).
+
+**Passed / Failed:**
+
+| Command | Result |
+|---|---|
+| `node --test tests/regno.test.js` | **21/21** |
+| `bash tests/integration.sh` (local) | **87/87** |
+| `BASE=https://scan.parswanadh.dev bash tests/integration.sh` | **87/87** |
+| `node tests/ui.mjs https://scan.parswanadh.dev` | **32/32** |
+| `npx csstree-validator public/styles.css` | clean (exit 0), braces 205/205, 0 ruler refs |
+| D1 migration (`direction`, `periods`, `session_minutes`, state index) | applied to production |
+| headless overflow at 320/344/360/390/414/480px | none at any width |
+
+**Next:** unchanged in substance, but smaller — scan a real card once and read
+`raw_code`, which is now the only unresolved question.
+
+**Safety:** all test rows deleted from production D1; `scans` is back to 0 and the
+only event is `General`. The sheet PIN is still `919148`, unchanged. No background
+jobs left running (`wrangler dev` on 8787 stopped).
+
+---
+
 ## 2026-09-29 (later) — Remove the participant role; PIN guards reading only
 
 **Did:** The first deploy had a Participant/Organizer picker on the landing

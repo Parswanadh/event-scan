@@ -21,14 +21,47 @@ and records it. Organizers get a live sheet and an Excel-compatible export.
   BarcodeDetector  ──(or──▶  vendored ZXing)           ← dual engine
       │
       ▼  normalizeRegNo()  ── one implementation, imported by BOTH
-  confirm screen: reg no + period ruler P1–P8 → hours
-      │
-      ▼  POST /api/scan
-  Worker ──▶ D1: scans(reg_no, periods, hours, scanned_at, raw_code, device)
+  confirm screen
+      │   GET /api/status  →  are they currently IN or OUT?
+      │   ├─ no open session  → arm IN
+      │   ├─ open session ≥40min → arm OUT
+      │   └─ open session <40min → arm OUT but warn "too soon"
+      │   organizer may override with the IN/OUT toggle
+      ▼  pick periods P1–P8 (tap to toggle) + POST /api/scan
+  Worker ──▶ D1: scans(reg_no, direction, periods, hours, session_minutes, …)
       │
       ▼
-  organizer dashboard ──▶ GET /api/export.csv  (UTF-8 BOM, opens in Excel)
+  sheet (PIN) ──▶ GET /api/export.csv  (UTF-8 BOM, opens in Excel)
 ```
+
+### IN / OUT attendance
+
+The first scan of a student for an event is an **IN**. A later scan closes that
+session as an **OUT** and records how long it lasted. The rule lives on the
+server, not the client, so a tampered request cannot write an impossible state:
+
+| Situation | Result |
+|---|---|
+| No open session | IN recorded |
+| Open session, ≥ 40 min elapsed | OUT recorded, `session_minutes` set |
+| Open session, < 40 min elapsed | **409 `too_soon`** — the organizer taps again to force it |
+| IN while already IN | 409 `already_in` |
+| OUT with no open session | 409 `no_open_session` |
+| After an OUT | the next scan is a fresh IN |
+
+The client asks `GET /api/status` as soon as a card is read and **arms the
+direction the server implies**, showing why ("Currently IN · 52 min"). The
+IN/OUT toggle is always visible so the organizer can deliberately override; the
+option the server would reject is disabled rather than hidden, so it is obvious
+*why* only one direction is available.
+
+### Periods
+
+Eight chips, tap to toggle — not a range slider. Tapping is easier one-handed
+while holding a card, and it is strictly more expressive: **P1+P2+P5** is now
+representable, which a range never was. `hours` is the count of selected
+periods, derived server-side and never trusted from the client. Periods are
+optional: an IN can be recorded without them.
 
 ### Camera selection
 
@@ -62,9 +95,25 @@ queue at the door.
 cp .dev.vars.example .dev.vars     # set ORGANIZER_PIN and SESSION_SECRET
 npm run db:local                   # apply schema.sql to the local D1
 npm run dev                        # http://localhost:8787
-npm run test:integration           # 56 assertions against the dev server
-npm test                           # 19 unit tests for the normalizer
+npm test                           # 21 unit tests for the normalizer
+npm run test:integration           # 87 assertions against the dev server
+npm run test:ui                    # 32 assertions driving the real page in Chrome
 ```
+
+`test:ui` needs `puppeteer-core` and a Chrome binary; it is the only test that
+exercises the controller, the period chips, the IN/OUT toggle and the view
+routing. It uses the manual-entry path, which funnels into the same
+`handleScanResult()` code as a successful barcode read, so the flow is covered
+without a camera or a card:
+
+```bash
+npm install --prefix /tmp/pptr puppeteer-core
+node tests/ui.mjs https://scan.parswanadh.dev
+```
+
+It caught a real bug that every other test missed: `renderStatus()` cleared the
+`forceNext` flag *after* it had been set, so the "record OUT anyway" override
+never appeared and a second tap simply repeated the refused request.
 
 ## Deploy
 
@@ -93,10 +142,12 @@ BASE=https://scan.parswanadh.dev PIN=<your-pin> bash tests/integration.sh
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/health` | — | Liveness + D1 reachability |
+| GET | `/api/config` | — | PIN length, the IN→OUT gap, period bounds |
+| GET | `/api/status` | — | Current IN/OUT state for one card (`?reg_no=`, `?event=`) |
 | POST | `/api/auth` | PIN body | Exchange the PIN for a signed session token |
-| POST | `/api/scan` | — | Record one attendance entry |
+| POST | `/api/scan` | — | Record an IN or OUT (`direction`, `periods[]`) |
 | GET | `/api/scans` | organizer | List scans (`?q=`, `?event=`, `?limit=`) |
-| GET | `/api/summary` | organizer | Counts, distinct students, total hours |
+| GET | `/api/summary` | organizer | Students, who is inside now, totals |
 | GET | `/api/events` | organizer | Event names |
 | POST | `/api/roster` | organizer | Bulk upsert `reg_no → name` so the sheet shows names |
 | GET | `/api/export.csv` | organizer | Excel-compatible download |

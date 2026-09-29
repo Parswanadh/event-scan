@@ -98,6 +98,16 @@ async function request(path, { method = 'GET', body, auth = false, raw = false }
 export const api = {
   health: () => request('/api/health'),
 
+  /** Public UI hints: PIN length, the IN→OUT minimum gap, period bounds. */
+  config: () => request('/api/config'),
+
+  /** Current presence for one card. Public — the scanner needs it before deciding. */
+  status: (regNo, event = '') => {
+    const p = new URLSearchParams({ reg_no: regNo });
+    if (event) p.set('event', event);
+    return request(`/api/status?${p}`);
+  },
+
   auth: (pin) => request('/api/auth', { method: 'POST', body: { pin } }),
 
   scan: (payload, { force = false } = {}) =>
