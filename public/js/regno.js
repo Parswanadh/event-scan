@@ -168,10 +168,13 @@ const NON_CANDIDATE_RE = /[^A-Z0-9.\-_/\\ ]+/;
  * ================================================================== */
 
 /**
- * Upper-case the payload, turn control characters into spaces (barcode field
- * separators such as GS/RS are separators, not noise to be spliced out — they
- * must not fuse `24` and `012` into `24012` by accident), fold whitespace runs,
- * then trim padding from both ends.
+ * Upper-case the payload, turn control characters into spaces, fold whitespace
+ * runs, then trim padding from both ends.
+ *
+ * A barcode field separator (GS 0x1D / RS 0x1E / CR / LF) becomes a space rather
+ * than being spliced out: deleting it would glue neighbouring fields together and
+ * change the digit run — `BL.EN.U4EAC24012<GS>2024` spliced becomes the
+ * unmatchable `...240122024`, while as a space the number still parses.
  *
  * @param {unknown} raw
  * @returns {string} cleaned payload, or "" when there is nothing usable

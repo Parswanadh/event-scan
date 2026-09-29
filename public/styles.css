@@ -3,7 +3,7 @@
    Mobile-first, dark editorial UI for one-handed use in a corridor.
 
    Hand-written modern CSS only: custom properties, clamp(), flex/grid, :has().
-   No framework, no preprocessor, no @import, no web fonts, no network deps.
+   No framework, no preprocessor, no CSS imports, no web fonts, no network deps.
 
    One accent colour: warm brass (#e8b44a). It carries the primary action, the
    scan reticle + laser, the ruler fill and handles, the derived hour count and
@@ -683,7 +683,7 @@ a {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: 3px;                        /* 38–40px visual, 44px touch target */
+  inset: 2px;                        /* 40px visible, 44px touch target */
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.5), inset 0 0 0 1px rgb(0 0 0 / 0.18);

@@ -15,7 +15,16 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "none",
-    "run_worker_first": ["/api/*"]
+    // The glob matcher compiles "/api/*" to ^/api/.*$, which does NOT match
+    // bare "/api" — hence both entries. Do not add "/api/docs" style rules
+    // alongside "/api/*": a rule ending in * makes same-prefix rules a hard
+    // config error.
+    "run_worker_first": ["/api", "/api/*"]
+  },
+
+  // Fail the deploy early rather than 500-ing at runtime when a secret is unset.
+  "secrets": {
+    "required": ["ORGANIZER_PIN", "SESSION_SECRET"]
   },
 
   "d1_databases": [
