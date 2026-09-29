@@ -53,6 +53,8 @@ const ACCEPTED_SAMPLES = [
   '{"reg":"BL.EN.U4EAC24012","year":2024}',
   'BL.EN.U4EAC24012 AMRITA',
   '1|BL.EN.U4EAC24012|BL.EN.U4EAC24013',
+  'BL  EN  U4EAC24012', // doubled spaces still fold to a single separator
+  'BL EN U4EAC24O I2', // number split across whitespace with a confused tail
   '^^^BL.EN.U4EAC24012~~~',
   "'BL.EN.U4EAC24012'",
   '#BL.EN.U4EAC24012#;',

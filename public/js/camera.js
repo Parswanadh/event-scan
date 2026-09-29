@@ -60,14 +60,21 @@ export function scoreDevice(device) {
     reasons.push('+100 rear-facing');
   }
 
-  // Android Chrome exposes "camera2 <n>, facing back". Camera 0 is the primary
+  // Chromium on Android builds this label in VideoCaptureCamera2.getName():
+  //     "camera " + index + ", facing " + facing (+ ", infrared")
+  // so the real string is "camera 0, facing back" — "camera2" is the Android
+  // API/class name and never appears in the label. Camera 0 is the primary
   // sensor on essentially every device; higher indices are the extras.
-  const cam2 = /camera2\s+(\d+)/i.exec(label);
-  if (cam2) {
-    const idx = Number(cam2[1]);
+  const camIdx = /camera2?\s+(\d+)/i.exec(label);
+  if (camIdx) {
+    const idx = Number(camIdx[1]);
     const bonus = Math.max(0, 30 - idx * 12);
     score += bonus;
-    if (bonus) reasons.push(`+${bonus} camera2 index ${idx}`);
+    if (bonus) reasons.push(`+${bonus} sensor index ${idx}`);
+  }
+  if (/\binfrared\b/i.test(label)) {
+    score -= 80;
+    reasons.push('-80 infrared sensor');
   }
 
   // iOS Safari names: "Back Camera" (main), "Back Dual Wide Camera" (main),

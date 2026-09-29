@@ -126,7 +126,9 @@ export function createScanner({ video, onResult, onStatus, onEngine, onDebug }) 
       ZXING_FORMATS.map((f) => Z.BarcodeFormat[f]).filter((v) => v !== undefined),
     );
     hints.set(Z.DecodeHintType.TRY_HARDER, true);
-    hints.set(Z.DecodeHintType.ASSUME_CODE_39_CHECK_DIGIT, false);
+    // Deliberately NOT setting ASSUME_CODE_39_CHECK_DIGIT: ZXing's setHints()
+    // tests that hint by *presence* (`!== undefined`), so setting it to false
+    // would still switch it on and break plain Code39 without a check digit.
     return hints;
   }
 
