@@ -43,12 +43,18 @@ device whose zoom range starts above 1×.
 Open <https://scan.parswanadh.dev/?debug=camera> to see the ranked list on a
 real phone, with the chosen device highlighted.
 
-### Roles
+### One mode: scan
 
-| Role | Auth | Can do |
-|---|---|---|
-| Participant | none | Self check-in: scan → periods → record |
-| Organizer | 6-digit PIN | Everything above, plus the live sheet and CSV export |
+Anyone with the link can scan, on behalf of anyone. A volunteer at the door works
+through a stack of ID cards — nobody signs in to be scanned.
+
+| Action | Auth |
+|---|---|
+| Scan a card and record attendance | **none** |
+| View the attendance sheet and export CSV/JSON | PIN (`Sheet` button, top right) |
+
+The PIN guards **reading, not writing**: it protects the sheet, and never blocks a
+queue at the door.
 
 ## Development
 
@@ -67,6 +73,12 @@ wrangler d1 execute event-scan-db --remote --file=./schema.sql   # once
 wrangler secret put ORGANIZER_PIN
 wrangler secret put SESSION_SECRET
 wrangler deploy
+```
+
+Change the sheet PIN at any time:
+
+```bash
+printf 'YOURNEWPIN' | wrangler secret put ORGANIZER_PIN && wrangler deploy
 ```
 
 Verify the live deployment:

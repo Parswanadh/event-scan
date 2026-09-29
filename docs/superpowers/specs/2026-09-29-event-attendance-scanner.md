@@ -35,9 +35,9 @@ separate backend, no third-party SaaS in the request path.
    `period_start = 1`, `period_end = 3`, and a UTC ISO timestamp.
 6. The organizer dashboard lists that row after a reload, and `GET /api/export.csv`
    downloads a UTF-8-BOM CSV whose header row and data row are correct.
-7. `POST /api/scan` without a valid organizer session still works (participant self
-   check-in), but `GET /api/scans` and `GET /api/export.csv` return **401** without a
-   valid session. A wrong PIN returns 401 and is rate-limited.
+7. `POST /api/scan` works with **no** credentials (anyone may scan on anyone's
+   behalf), but `GET /api/scans` and `GET /api/export.csv` return **401** without
+   a valid session. A wrong PIN returns 401 and is rate-limited.
 8. `wrangler deploy` succeeds, and `https://scan.parswanadh.dev` serves the built
    `index.html` — the custom domain route is live on the Free-plan zone.
 9. A GitHub repository exists under the user's account with the full history pushed.
@@ -73,16 +73,18 @@ separate backend, no third-party SaaS in the request path.
 
 ### Roles
 
-A single page with two entry points:
+There is **one working mode**. A volunteer at the door takes a stack of ID cards
+and scans them on behalf of their owners — nobody signs in to be scanned, and
+nobody scans only themselves.
 
-- **Participant / self check-in** — the default. Scan → confirm reg no → pick periods →
-  submit. No login.
-- **Organizer** — PIN gate. Scan on behalf of a student *and* view/export the sheet.
+The PIN therefore guards **reading, not writing**: it protects viewing and
+exporting the attendance sheet. It never gates scanning, because a queue at the
+door must not be blocked on a password. This was corrected after the first
+deploy, when the initial design (a Participant/Organizer picker) was rejected as
+not matching how the event actually runs.
 
-The user asked that "for the initial scan the scanner should be able to opt as
-organizer", so the role choice is the first thing on the screen and is remembered in
-`localStorage`. Choosing Organizer the first time prompts for the PIN; a wrong PIN does
-not lock the participant path.
+- **Scan** — open to anyone with the link. Scan → normalise → periods → record.
+- **Sheet** — PIN-gated. Live attendance list, search, and CSV/JSON export.
 
 ### Camera selection (the part most likely to be got wrong)
 

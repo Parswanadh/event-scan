@@ -1,12 +1,17 @@
 /**
  * App controller: view routing, the scan -> confirm -> record flow, the period
- * ruler, and the organizer dashboard.
+ * ruler, and the attendance sheet.
+ *
+ * There is one working mode. Anybody can scan on behalf of anybody — a volunteer
+ * at the door takes a stack of ID cards and works through them. The PIN guards
+ * only *reading* the sheet: viewing and exporting it. It never gates scanning,
+ * because a queue at the door must never be blocked on a password.
  *
  * No framework and no client-side URL router — views are toggled with the
  * `hidden` attribute, which keeps the Worker's asset routing trivial.
  */
 
-import { api, getToken, setToken, getRole, setRole, getEventName, setEventName } from './api.js';
+import { api, getToken, setToken, getEventName, setEventName } from './api.js';
 import { createScanner } from './scanner.js';
 import { normalizeRegNo } from './regno.js';
 import { listVideoInputs, rankCameras, hasLabels } from './camera.js';
@@ -14,9 +19,8 @@ import { listVideoInputs, rankCameras, hasLabels } from './camera.js';
 const $ = (id) => document.getElementById(id);
 
 const el = {
-  roleChip: $('roleChip'),
-  roleChipLabel: $('roleChipLabel'),
-  roleHint: $('roleHint'),
+  sheetBtn: $('sheetBtn'),
+  sheetLabel: $('sheetLabel'),
 
   pinForm: $('pinForm'),
   pinInput: $('pinInput'),
@@ -77,7 +81,6 @@ const el = {
 };
 
 const state = {
-  role: getRole() || null,
   eventName: getEventName() || 'General',
   pending: null, // { raw, regNo, format, via }
   lastResult: null,
@@ -92,7 +95,7 @@ let toastTimer = null;
 
 /* ------------------------------------------------------------------- chrome */
 
-const VIEWS = ['role', 'pin', 'scan', 'confirm', 'done', 'dash', 'debug'];
+const VIEWS = ['pin', 'scan', 'confirm', 'done', 'dash', 'debug'];
 
 function showView(name) {
   for (const v of VIEWS) {
@@ -123,8 +126,12 @@ function toast(message) {
   }, 2600);
 }
 
-function setRoleLabel(role) {
-  el.roleChipLabel.textContent = role === 'organizer' ? 'Organizer' : 'Participant';
+function setSheetState(unlocked) {
+  el.sheetLabel.textContent = unlocked ? 'Sheet' : 'Sheet';
+  el.sheetBtn.classList.toggle('is-unlocked', Boolean(unlocked));
+  el.sheetBtn.title = unlocked
+    ? 'View and export the attendance sheet'
+    : 'Enter the PIN to view the attendance sheet';
 }
 
 /* --------------------------------------------------------------- wake lock */
@@ -265,11 +272,6 @@ function setupRuler() {
 /* ------------------------------------------------------------------- flows */
 
 async function gotoScan() {
-  if (state.role === 'organizer' && !getToken()) {
-    showView('pin');
-    el.pinInput.focus();
-    return;
-  }
   showError(el.scanError, '');
   el.manualForm.hidden = true;
   showView('scan');
@@ -350,7 +352,7 @@ async function submitScan({ force = false } = {}) {
       reg_no: regNo,
       raw_code: state.pending?.raw || '',
       event_name: state.eventName,
-      scan_type: state.role === 'organizer' ? 'organizer-scan' : 'self check-in',
+      scan_type: 'check-in',
       period_start: state.periodStart,
       period_end: state.periodEnd,
       scanned_at: new Date().toISOString(),
@@ -491,6 +493,7 @@ async function loadDashboard({ quiet = false } = {}) {
   } catch (err) {
     if (err.status === 401) {
       setToken(null);
+      setSheetState(false);
       toast('Session expired — enter the PIN again.');
       showView('pin');
       el.pinInput.focus();
@@ -559,25 +562,19 @@ async function showDebugView() {
 /* --------------------------------------------------------------------- init */
 
 function wireEvents() {
-  document.querySelectorAll('[data-role]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const role = btn.dataset.role;
-      state.role = role;
-      setRole(role);
-      setRoleLabel(role);
-      if (role === 'organizer') {
-        if (getToken()) {
-          showView('dash');
-          await loadDashboard();
-          startDashPolling();
-        } else {
-          showView('pin');
-          el.pinInput.focus();
-        }
-      } else {
-        gotoScan();
-      }
-    });
+  // The sheet is the only PIN-gated thing in the app.
+  el.sheetBtn.addEventListener('click', async () => {
+    scanner?.stop();
+    releaseAwake();
+    if (getToken()) {
+      showView('dash');
+      await loadDashboard();
+      startDashPolling();
+    } else {
+      showError(el.pinError, '');
+      showView('pin');
+      el.pinInput.focus();
+    }
   });
 
   document.querySelectorAll('[data-goto]').forEach((btn) => {
@@ -593,16 +590,6 @@ function wireEvents() {
     });
   });
 
-  el.roleChip.addEventListener('click', () => {
-    scanner?.stop();
-    releaseAwake();
-    el.roleHint.hidden = !state.role;
-    if (state.role) {
-      el.roleHint.textContent = `Currently signed in as ${state.role}. Pick a different mode below.`;
-    }
-    showView('role');
-  });
-
   el.pinForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     showError(el.pinError, '');
@@ -611,6 +598,7 @@ function wireEvents() {
     try {
       const res = await api.auth(el.pinInput.value.trim());
       setToken(res.token);
+      setSheetState(true);
       el.pinInput.value = '';
       showView('dash');
       await loadDashboard();
@@ -709,12 +697,11 @@ function wireEvents() {
 
   el.btnSignOut.addEventListener('click', () => {
     setToken(null);
+    setSheetState(false);
     clearInterval(dashTimer);
-    state.role = null;
-    setRole('');
-    setRoleLabel('Participant');
-    toast('Signed out of organizer view.');
-    showView('role');
+    renderDashList.lastId = 0;
+    toast('Sheet locked.');
+    gotoScan();
   });
 
   // A backgrounded tab must not hold the camera; iOS will kill the stream anyway.
@@ -722,7 +709,7 @@ function wireEvents() {
     if (document.hidden) {
       scanner?.stop();
       releaseAwake();
-    } else if (!$('view-scan').hidden && state.role) {
+    } else if (!$('view-scan').hidden) {
       startScanner();
     }
   });
@@ -732,7 +719,7 @@ async function init() {
   buildTicks();
   setupRuler();
   wireEvents();
-  setRoleLabel(state.role || 'participant');
+  setSheetState(Boolean(getToken()));
 
   const params = new URLSearchParams(location.search);
   if (params.get('debug') === 'camera') {
@@ -740,15 +727,8 @@ async function init() {
     return;
   }
 
-  if (state.role === 'organizer' && getToken()) {
-    showView('dash');
-    await loadDashboard();
-    startDashPolling();
-  } else if (state.role) {
-    gotoScan();
-  } else {
-    showView('role');
-  }
+  // The scanner is the app. Nobody has to sign in to use it.
+  gotoScan();
 }
 
 init();

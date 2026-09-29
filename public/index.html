@@ -20,44 +20,19 @@
       <span class="brand__dot" aria-hidden="true"></span>
       <span class="brand__name">Attendance</span>
     </div>
-    <button type="button" class="chip" id="roleChip" aria-haspopup="true">
-      <span id="roleChipLabel">Participant</span>
-      <span class="chip__caret" aria-hidden="true">▾</span>
+    <button type="button" class="chip" id="sheetBtn" aria-haspopup="true">
+      <span id="sheetLabel">Sheet</span>
+      <span class="chip__caret" aria-hidden="true">▤</span>
     </button>
   </header>
 
   <main class="main" id="main">
 
-    <!-- ── 1. role picker ─────────────────────────────────────────── -->
-    <section class="view" id="view-role" data-view="role">
-      <h1 class="hero">Who's scanning?</h1>
-      <p class="lede">Pick a mode. You can change it any time from the pill above.</p>
-
-      <div class="choices">
-        <button type="button" class="choice" data-role="participant">
-          <span class="choice__icon" aria-hidden="true">◎</span>
-          <span class="choice__body">
-            <span class="choice__title">Participant</span>
-            <span class="choice__sub">Scan your own ID and record your hours</span>
-          </span>
-        </button>
-
-        <button type="button" class="choice" data-role="organizer">
-          <span class="choice__icon" aria-hidden="true">▤</span>
-          <span class="choice__body">
-            <span class="choice__title">Organizer</span>
-            <span class="choice__sub">Scan for others, view the sheet, export to Excel</span>
-          </span>
-        </button>
-      </div>
-
-      <p class="hint" id="roleHint" hidden></p>
-    </section>
-
-    <!-- ── 2. organizer PIN ───────────────────────────────────────── -->
+    <!-- ── 1. sheet PIN (guards viewing/exporting, never scanning) ─── -->
     <section class="view" id="view-pin" data-view="pin" hidden>
-      <h1 class="hero">Organizer PIN</h1>
-      <p class="lede">Enter the event PIN to unlock the organizer view.</p>
+      <h1 class="hero">Sheet PIN</h1>
+      <p class="lede">Scanning is open to everyone. The PIN only guards viewing
+        and exporting the attendance sheet.</p>
 
       <form class="stack" id="pinForm" autocomplete="off">
         <input class="input input--pin" id="pinInput" type="password" inputmode="numeric"
@@ -66,11 +41,11 @@
         <button type="submit" class="btn btn--primary" id="pinSubmit">Unlock</button>
       </form>
 
-      <button type="button" class="btn btn--ghost" data-goto="role">Cancel</button>
+      <button type="button" class="btn btn--ghost" data-goto="scan">Back to scanner</button>
     </section>
 
-    <!-- ── 3. scanner ─────────────────────────────────────────────── -->
-    <section class="view view--scan" id="view-scan" data-view="scan" hidden>
+    <!-- ── 2. scanner — the home view ─────────────────────────────── -->
+    <section class="view view--scan" id="view-scan" data-view="scan">
       <div class="scanner">
         <video id="video" class="scanner__video" playsinline muted autoplay></video>
         <div class="scanner__overlay" aria-hidden="true">
@@ -101,7 +76,8 @@
       </div>
 
       <p class="error" id="scanError" hidden role="alert"></p>
-      <button type="button" class="btn btn--ghost" data-goto="role">Back</button>
+      <p class="hint">Everyone scans on behalf of others — no sign-in needed.
+        Tap <strong>Sheet</strong> above to view or export the attendance.</p>
     </section>
 
     <!-- ── 4. confirm + duration ──────────────────────────────────── -->
@@ -161,11 +137,10 @@
       <div class="actions">
         <button type="button" class="btn btn--primary btn--lg" id="btnScanNext">Scan next</button>
         <button type="button" class="btn btn--ghost" id="btnForce" hidden>Record anyway</button>
-        <button type="button" class="btn btn--ghost" data-goto="role">Done</button>
       </div>
     </section>
 
-    <!-- ── 6. organizer dashboard ─────────────────────────────────── -->
+    <!-- ── 6. attendance sheet (PIN-gated) ────────────────────────── -->
     <section class="view" id="view-dash" data-view="dash" hidden>
       <div class="stats" id="dashStats">
         <div class="stat"><span class="stat__value" id="statStudents">—</span><span class="stat__label">students</span></div>
@@ -203,7 +178,7 @@
         <tbody></tbody>
       </table>
       <pre class="pre" id="debugCaps"></pre>
-      <button type="button" class="btn btn--ghost" data-goto="role">Back</button>
+      <button type="button" class="btn btn--ghost" data-goto="scan">Back to scanner</button>
     </section>
 
   </main>

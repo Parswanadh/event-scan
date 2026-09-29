@@ -7,7 +7,6 @@
  */
 
 const TOKEN_KEY = 'attendance.token.v1';
-const ROLE_KEY = 'attendance.role.v1';
 const EVENT_KEY = 'attendance.event.v1';
 
 export function getToken() {
@@ -24,22 +23,6 @@ export function setToken(token) {
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* private mode — the app still works, the organizer just re-enters the PIN */
-  }
-}
-
-export function getRole() {
-  try {
-    return localStorage.getItem(ROLE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setRole(role) {
-  try {
-    localStorage.setItem(ROLE_KEY, role);
-  } catch {
-    /* ignore */
   }
 }
 

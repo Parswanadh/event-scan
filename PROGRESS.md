@@ -1,5 +1,58 @@
 # PROGRESS
 
+## 2026-09-29 (later) — Remove the participant role; PIN guards reading only
+
+**Did:** The first deploy had a Participant/Organizer picker on the landing
+screen. The user corrected the requirement: **everyone scans on behalf of
+everyone else** — a volunteer works through a stack of ID cards — so a
+"scan your own ID" mode does not describe the event and the picker was pure
+friction. Reworked so that:
+
+- The **scanner is the app**. Landing goes straight to the camera; there is no
+  role screen and no `localStorage` role. Nobody signs in to scan.
+- The PIN now guards **reading, not writing** — the top-right chip is a **Sheet**
+  button that opens the attendance list and export after the PIN. Scanning was
+  already public server-side; the client just stopped gating it.
+- `scan_type` is uniformly `check-in` (the organizer/participant distinction is
+  gone from the data as well as the UI).
+- Deleted the now-dead `.choices` / `.choice*` CSS (1,156 bytes) and the
+  `getRole`/`setRole` helpers, so nothing is left claiming a role exists.
+
+**Found:** Removing a role from a single-page app is mostly a *deletion* problem,
+and the risk is a dangling reference rather than a logic error. Added a static
+contract check that is worth keeping:
+
+```
+every $("id") in the JS resolves to a real element
+views:      ['confirm','dash','debug','done','pin','scan']
+data-goto:  ['scan']  — dangling targets: none
+VIEWS in app.js == views in index.html
+```
+
+That check would have caught the failure mode this refactor invites: a view ID
+removed from the HTML while `showView()` still names it, which throws only at the
+moment a user taps the thing.
+
+**Passed / Failed:**
+
+| Command | Result |
+|---|---|
+| `node --check` on all 5 modules + the Worker | all parse |
+| `npx csstree-validator public/styles.css` | clean (exit 0) |
+| DOM-contract static check | 60 ids, 0 dangling |
+| `POST /api/scan` with no credentials | **201** (scanning is open) |
+| `GET /api/scans` with no credentials | **401** (sheet is protected) |
+| `BASE=https://scan.parswanadh.dev bash tests/integration.sh` | **56/56** |
+| deployed HTML contains `data-role`/`view-role` | 0 occurrences |
+
+**Next:** unchanged — scan a real card and read `scans.raw_code` from D1.
+
+**Safety:** the smoke-test row written while verifying (`event_name =
+'SmokeTest'`) was deleted from production D1. The sheet PIN is unchanged
+(`919148`) and is stored only as a Worker secret.
+
+---
+
 ## 2026-09-29 — Build and deploy the barcode attendance scanner (2-hour budget)
 
 **Did:** Built and deployed a complete mobile barcode attendance scanner for

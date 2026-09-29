@@ -256,6 +256,15 @@ a {
   text-overflow: ellipsis;
 }
 
+/* The sheet is unlocked for this session (a valid organizer token is held). */
+.chip.is-unlocked {
+  border-color: var(--accent-38, var(--accent));
+  color: var(--accent);
+}
+.chip.is-unlocked .chip__caret {
+  color: var(--accent);
+}
+
 .chip__caret {
   flex: none;
   color: var(--muted);
@@ -346,67 +355,6 @@ a {
   color: var(--faint);
   font-size: var(--t-sm);
   text-align: center;
-}
-
-/* ── 6. Choices (role picker) ──────────────────────────────────────────── */
-
-.choices {
-  display: grid;
-  gap: var(--gap);
-  margin-top: 1.4rem;
-}
-
-.choice {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.9rem;
-  width: 100%;
-  min-height: var(--tap);
-  padding: 0.95rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--surface-1);
-  text-align: left;
-  transition: border-color 0.16s ease, background-color 0.16s ease,
-    transform 0.12s ease;
-}
-
-.choice:active {
-  transform: scale(0.995);
-  border-color: var(--line-strong);
-  background: var(--surface-2);
-}
-
-.choice__icon {
-  display: grid;
-  place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: 1.15rem;
-  line-height: 1;
-}
-
-.choice__body {
-  display: grid;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.choice__title {
-  font-size: var(--t-md);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.choice__sub {
-  color: var(--muted);
-  font-size: var(--t-sm);
-  line-height: 1.4;
 }
 
 /* ── 7. Cards ──────────────────────────────────────────────────────────── */
