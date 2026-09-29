@@ -1,0 +1,19 @@
+{
+  "name": "Attendance Scanner",
+  "short_name": "Attendance",
+  "description": "Barcode attendance scanner for Amrita Bengaluru events.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0C0E",
+  "theme_color": "#0B0C0E",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

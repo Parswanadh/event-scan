@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B0C0E">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Barcode attendance scanner for Amrita Bengaluru events.">
+<title>Attendance Scanner</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__dot" aria-hidden="true"></span>
+      <span class="brand__name">Attendance</span>
+    </div>
+    <button type="button" class="chip" id="roleChip" aria-haspopup="true">
+      <span id="roleChipLabel">Participant</span>
+      <span class="chip__caret" aria-hidden="true">▾</span>
+    </button>
+  </header>
+
+  <main class="main" id="main">
+
+    <!-- ── 1. role picker ─────────────────────────────────────────── -->
+    <section class="view" id="view-role" data-view="role">
+      <h1 class="hero">Who's scanning?</h1>
+      <p class="lede">Pick a mode. You can change it any time from the pill above.</p>
+
+      <div class="choices">
+        <button type="button" class="choice" data-role="participant">
+          <span class="choice__icon" aria-hidden="true">◎</span>
+          <span class="choice__body">
+            <span class="choice__title">Participant</span>
+            <span class="choice__sub">Scan your own ID and record your hours</span>
+          </span>
+        </button>
+
+        <button type="button" class="choice" data-role="organizer">
+          <span class="choice__icon" aria-hidden="true">▤</span>
+          <span class="choice__body">
+            <span class="choice__title">Organizer</span>
+            <span class="choice__sub">Scan for others, view the sheet, export to Excel</span>
+          </span>
+        </button>
+      </div>
+
+      <p class="hint" id="roleHint" hidden></p>
+    </section>
+
+    <!-- ── 2. organizer PIN ───────────────────────────────────────── -->
+    <section class="view" id="view-pin" data-view="pin" hidden>
+      <h1 class="hero">Organizer PIN</h1>
+      <p class="lede">Enter the event PIN to unlock the organizer view.</p>
+
+      <form class="stack" id="pinForm" autocomplete="off">
+        <input class="input input--pin" id="pinInput" type="password" inputmode="numeric"
+               pattern="[0-9]*" maxlength="12" placeholder="••••" aria-label="Organizer PIN" required>
+        <p class="error" id="pinError" hidden role="alert"></p>
+        <button type="submit" class="btn btn--primary" id="pinSubmit">Unlock</button>
+      </form>
+
+      <button type="button" class="btn btn--ghost" data-goto="role">Cancel</button>
+    </section>
+
+    <!-- ── 3. scanner ─────────────────────────────────────────────── -->
+    <section class="view view--scan" id="view-scan" data-view="scan" hidden>
+      <div class="scanner">
+        <video id="video" class="scanner__video" playsinline muted autoplay></video>
+        <div class="scanner__overlay" aria-hidden="true">
+          <div class="reticle"><span class="reticle__laser"></span></div>
+        </div>
+
+        <div class="scanner__status" id="scanStatus" role="status">Starting camera…</div>
+
+        <div class="scanner__tools">
+          <button type="button" class="icon-btn" id="btnTorch" title="Torch" hidden>☀</button>
+          <button type="button" class="icon-btn" id="btnSwitch" title="Switch camera">⟳</button>
+          <button type="button" class="icon-btn" id="btnTorchOff" hidden aria-hidden="true"></button>
+        </div>
+      </div>
+
+      <div class="scan-meta">
+        <span class="pill" id="camLabel">camera: —</span>
+        <span class="pill" id="engineLabel">engine: —</span>
+      </div>
+
+      <div class="fallback">
+        <button type="button" class="btn btn--ghost" id="btnManual">Enter code manually</button>
+        <form class="stack" id="manualForm" hidden>
+          <input class="input" id="manualInput" type="text" autocapitalize="characters"
+                 spellcheck="false" placeholder="BL.EN.U4EAC24012" aria-label="Registration number">
+          <button type="submit" class="btn btn--primary">Use this code</button>
+        </form>
+      </div>
+
+      <p class="error" id="scanError" hidden role="alert"></p>
+      <button type="button" class="btn btn--ghost" data-goto="role">Back</button>
+    </section>
+
+    <!-- ── 4. confirm + duration ──────────────────────────────────── -->
+    <section class="view" id="view-confirm" data-view="confirm" hidden>
+      <h1 class="hero">Confirm</h1>
+
+      <div class="card card--reg">
+        <span class="card__label">Registration number</span>
+        <input class="regno" id="confirmRegNo" type="text" autocapitalize="characters"
+               spellcheck="false" aria-label="Registration number">
+        <span class="card__note" id="confirmRaw"></span>
+      </div>
+
+      <div class="card">
+        <span class="card__label">Event</span>
+        <input class="input" id="eventName" type="text" list="eventList"
+               placeholder="General" aria-label="Event name">
+        <datalist id="eventList"></datalist>
+      </div>
+
+      <div class="card">
+        <div class="card__head">
+          <span class="card__label">Periods attended</span>
+          <span class="hours" id="hoursOut">3 hours</span>
+        </div>
+
+        <div class="ruler" id="periodRuler" role="group" aria-label="Select period range">
+          <div class="ruler__track"><div class="ruler__fill" id="rulerFill"></div></div>
+          <button type="button" class="ruler__handle" id="handleStart"
+                  role="slider" aria-label="Start period" aria-valuemin="1" aria-valuemax="8" aria-valuenow="1">1</button>
+          <button type="button" class="ruler__handle" id="handleEnd"
+                  role="slider" aria-label="End period" aria-valuemin="1" aria-valuemax="8" aria-valuenow="3">3</button>
+        </div>
+
+        <div class="ticks" id="periodTicks"></div>
+        <p class="hint">P<span id="periodFrom">1</span> – P<span id="periodTo">3</span> · hours are counted inclusively</p>
+      </div>
+
+      <p class="error" id="confirmError" hidden role="alert"></p>
+
+      <div class="actions">
+        <button type="button" class="btn btn--primary btn--lg" id="btnSubmit">Record attendance</button>
+        <button type="button" class="btn btn--ghost" data-goto="scan">Scan again</button>
+      </div>
+    </section>
+
+    <!-- ── 5. result ──────────────────────────────────────────────── -->
+    <section class="view" id="view-done" data-view="done" hidden>
+      <div class="result" id="resultBox">
+        <span class="result__mark" id="resultMark" aria-hidden="true">✓</span>
+        <h1 class="result__title" id="resultTitle">Recorded</h1>
+        <p class="result__sub" id="resultSub"></p>
+      </div>
+
+      <dl class="facts" id="resultFacts"></dl>
+
+      <div class="actions">
+        <button type="button" class="btn btn--primary btn--lg" id="btnScanNext">Scan next</button>
+        <button type="button" class="btn btn--ghost" id="btnForce" hidden>Record anyway</button>
+        <button type="button" class="btn btn--ghost" data-goto="role">Done</button>
+      </div>
+    </section>
+
+    <!-- ── 6. organizer dashboard ─────────────────────────────────── -->
+    <section class="view" id="view-dash" data-view="dash" hidden>
+      <div class="stats" id="dashStats">
+        <div class="stat"><span class="stat__value" id="statStudents">—</span><span class="stat__label">students</span></div>
+        <div class="stat"><span class="stat__value" id="statScans">—</span><span class="stat__label">scans</span></div>
+        <div class="stat"><span class="stat__value" id="statHours">—</span><span class="stat__label">hours</span></div>
+      </div>
+
+      <div class="toolbar">
+        <input class="input input--search" id="dashSearch" type="search"
+               placeholder="Search reg no or name" aria-label="Search">
+        <button type="button" class="icon-btn" id="btnRefresh" title="Refresh">⟳</button>
+      </div>
+
+      <div class="toolbar toolbar--split">
+        <a class="btn btn--primary" id="btnExport" href="/api/export.csv" download>Export Excel (CSV)</a>
+        <button type="button" class="btn btn--ghost" id="btnExportJson">Export JSON</button>
+      </div>
+
+      <p class="hint" id="dashUpdated"></p>
+      <ul class="list" id="dashList"></ul>
+      <p class="empty" id="dashEmpty" hidden>No scans yet.</p>
+
+      <div class="actions">
+        <button type="button" class="btn btn--primary btn--lg" data-goto="scan">Scan a card</button>
+        <button type="button" class="btn btn--ghost" id="btnSignOut">Sign out</button>
+      </div>
+    </section>
+
+    <!-- ── debug: camera ranking (?debug=camera) ──────────────────── -->
+    <section class="view" id="view-debug" data-view="debug" hidden>
+      <h1 class="hero">Camera debug</h1>
+      <p class="lede">Ranked rear-camera candidates. The top entry is what the scanner opens.</p>
+      <table class="table" id="debugTable">
+        <thead><tr><th>#</th><th>Label</th><th>Score</th><th>Device</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <pre class="pre" id="debugCaps"></pre>
+      <button type="button" class="btn btn--ghost" data-goto="role">Back</button>
+    </section>
+
+  </main>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</div>
+
+<script src="/vendor/zxing.min.js" defer></script>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
