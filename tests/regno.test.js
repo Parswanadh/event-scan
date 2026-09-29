@@ -91,6 +91,31 @@ const FALLBACK_SAMPLES = [
   ['roll no 42', 'ROLLNO42'],
 ];
 
+/**
+ * Hostile inputs discovered by property-fuzzing the module. They are kept as
+ * regressions because they broke the idempotence property once: the fallback
+ * strips internal whitespace, which can join fragments into something a second
+ * pass would happily parse as a *different* value.
+ */
+const IDEMPOTENCE_REGRESSIONS = [
+  '9\rQ-"SJ/H\u001dQQ7SWD6B\tIB-',
+  "'OHFAD1GB \u0000\rB8GQ2",
+  '-WQEDY4ZKV1O\rG0\u001d7\\_,M#0PJL_6\u001d OQ~',
+  'N6K2"C"IDIDB9CX\r DDZD0*_/H1~',
+  '`H,ZBUZD1 XX\tS8\u001dLQS',
+  '_DQ7Q\t3QDQBG,QIOCS2QW4ZBQ\nD~S".72"_P',
+  ";MHJDM5CQFZ6\nLZG\n5~'2\u001d9/G",
+  'JDLU_\u001dG6R\rDL1S2G"I9""QS',
+  '*`\u0000PUEZL9FCP16LS\u001dO',
+  "GSSJH\t2GHJHSB4\u00002SZ|,VY'S I1W^AFIQ'HXQ",
+  "^'W#HLY\";Y-DOS4T6Q;C\nYWZL4DB7ZLQ3'J*",
+  ';D^NSKW/B\u00003DLZZ0GS3\rQ\t# F;G',
+  'Z \\BW_~\rZN|B#-FBS\u0000\nJ\u001d\tE6WLAR588BO',
+  '2M\tTQ\nEAZ9O8G||0,*UV\n\tMRG6KAG4OO\tG0',
+  'GQA\u001dL9"DB0PY`BZNOG0L\nCISZG3L',
+  'R\u001dLTAO5E\nXID91DQ*BO0',
+];
+
 test('module exports exactly the four documented names', () => {
   assert.deepEqual(Object.keys(regno).sort(), [
     'REGNO_PATTERN',
@@ -172,6 +197,14 @@ test('noisy prefix/suffix punctuation is stripped', () => {
   assert.equal(normalizeRegNo('#BL.EN.U4EAC24012#'), CANONICAL);
   assert.equal(normalizeRegNo('*^~BL.EN.U4EAC24012~^*'), CANONICAL);
   assert.equal(normalizeRegNo('.BL.EN.U4EAC24012.'), CANONICAL);
+});
+
+test('registration number split across whitespace is still recovered', () => {
+  // Whitespace inside a payload is a field separator, not content.
+  assert.equal(normalizeRegNo('BL  EN  U4EAC24012'), CANONICAL);
+  assert.equal(normalizeRegNo('BL EN U4EAC24O I2'), CANONICAL);
+  assert.equal(normalizeRegNo('1|BL EN U4EAC24012|2024'), CANONICAL);
+  assert.equal(normalizeRegNo('BL.EN.U4EAC24012\u0000\u0000AMRITA'), CANONICAL);
 });
 
 test('every accepted sample normalizes to the canonical value', () => {
@@ -355,6 +388,7 @@ test('normalizeRegNo is idempotent for every sample', () => {
     ...ACCEPTED_SAMPLES,
     ...ALT_VALID_SAMPLES,
     ...FALLBACK_SAMPLES.map(([input]) => input),
+    ...IDEMPOTENCE_REGRESSIONS,
     '',
     '   ',
     'ab',
@@ -367,5 +401,66 @@ test('normalizeRegNo is idempotent for every sample', () => {
     const once = normalizeRegNo(input);
     const twice = normalizeRegNo(once);
     assert.equal(twice, once, `not idempotent for ${JSON.stringify(input)} -> ${JSON.stringify(once)}`);
+  }
+});
+
+test('property fuzz: idempotent, never invents a head, never rewrites outside the tail', () => {
+  // Deterministic PRNG (mulberry32) so a failure is always reproducible.
+  let seed = 0x9e3779b9;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = (alphabet) => alphabet[Math.floor(random() * alphabet.length)];
+  const ALPHABET = `ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_/\\|*^~#;,'"\`OQDILSBZG\u0000\u001d\t\r\n`;
+
+  /** Independent reimplementation of the module's "alphanumeric projection". */
+  const alnumProjection = (s) =>
+    s.toUpperCase().replace(/[\u0000-\u001F\u007F]/g, '').replace(/[^A-Z0-9]/g, '');
+
+  const CONFUSABLE = { O: '0', Q: '0', D: '0', I: '1', L: '1', S: '5', B: '8', Z: '2', G: '6' };
+
+  for (let i = 0; i < 20000; i += 1) {
+    const length = 1 + Math.floor(random() * 40);
+    let input = '';
+    for (let k = 0; k < length; k += 1) input += pick(ALPHABET);
+
+    const out = normalizeRegNo(input);
+    assert.equal(typeof out, 'string');
+
+    // (a) idempotence
+    assert.equal(
+      normalizeRegNo(out),
+      out,
+      `not idempotent: ${JSON.stringify(input)} -> ${JSON.stringify(out)}`,
+    );
+
+    if (!isValidRegNo(out)) continue;
+
+    // (b) no invention: the alphabetic head must exist verbatim in the input's
+    //     alphanumeric projection, and the digits after it must only have been
+    //     rewritten by the documented confusable map.
+    const flat = alnumProjection(input);
+    const head = out.replace(/\./g, '').slice(0, -5);
+    const tail = out.slice(-5);
+    let found = false;
+    for (let at = flat.indexOf(head); at !== -1; at = flat.indexOf(head, at + 1)) {
+      const source = flat.slice(at + head.length, at + head.length + 5);
+      if (source.length !== 5) continue;
+      const consistent = [...source].every(
+        (ch, j) => ch === tail[j] || CONFUSABLE[ch] === tail[j],
+      );
+      if (consistent) {
+        found = true;
+        break;
+      }
+    }
+    assert.ok(
+      found,
+      `invented a registration number: ${JSON.stringify(input)} -> ${out} (input projection ${flat})`,
+    );
   }
 });

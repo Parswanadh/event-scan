@@ -5,9 +5,12 @@
    Hand-written modern CSS only: custom properties, clamp(), flex/grid, :has().
    No framework, no preprocessor, no @import, no web fonts, no network deps.
 
-   One accent colour: warm brass (#e8b44a). Used only for the primary action,
-   the scan reticle + laser, the ruler fill + active handles, derived hours,
-   and focus rings. Red exists solely as a status colour for errors.
+   One accent colour: warm brass (#e8b44a). It carries the primary action, the
+   scan reticle + laser, the ruler fill and handles, the derived hour count and
+   focus rings. The reds below are status colours for failures, never decor.
+
+   Scroll model: the document scrolls (app.js resets position with
+   window.scrollTo), so .topbar and .actions stick against the viewport.
    ========================================================================== */
 
 /* ── 1. Tokens ─────────────────────────────────────────────────────────── */
@@ -38,11 +41,8 @@
   --accent-22: rgb(232 180 74 / 0.22);
   --accent-38: rgb(232 180 74 / 0.38);
   --accent-55: rgb(232 180 74 / 0.55);
-  --ink-2: #c8ccd2;                  /* secondary body text */
-  --warn: #e8a33a;                   /* duplicate / attention state */
-  --warn-dim: rgb(232 163 58 / 0.14);
 
-  /* Status only — never decorative. */
+  /* Status only: errors, duplicate scans, the failed-camera state. */
   --danger: #f0836f;
   --danger-ink: #f9bcae;
   --danger-bg: rgb(240 131 111 / 0.1);
@@ -87,13 +87,14 @@
 }
 
 html {
-  height: 100%;
+  min-height: 100%;
+  overflow-x: hidden;                /* viewport-level clip: sticky stays sane */
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  height: 100%;
+  min-height: 100dvh;
   margin: 0;
   background: var(--bg);
   color: var(--text);
@@ -181,10 +182,8 @@ a {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 100dvh;
   max-width: 100%;
-  overflow-x: clip;                  /* belt-and-braces: no sideways scroll */
   background: var(--bg);
 }
 
@@ -266,10 +265,6 @@ a {
 
 .main {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
   padding-block: 1.15rem 0;
   padding-inline: var(--pad-l) var(--pad-r);
 }
@@ -456,7 +451,7 @@ a {
   line-height: 1.4;
 }
 
-/* The hero value on the confirm screen. */
+/* The hero value on the confirm screen: big, tracked, monospaced, inset. */
 .regno {
   width: 100%;
   min-height: 54px;
@@ -542,7 +537,7 @@ a {
   padding-inline: 0.85rem;
 }
 
-/* Search field decoration reset (the ✕ clear affordance is left native). */
+/* Search field decoration reset; the ✕ clear affordance is left native. */
 .input[type="search"] {
   -webkit-appearance: none;
   appearance: none;
@@ -661,6 +656,8 @@ a {
   box-shadow: 0 0 12px var(--accent-22);
 }
 
+/* Handles sit at the centre of each eighth ((p - 0.5) * 12.5%), which is
+   exactly where the .ticks columns below are centred. */
 .ruler__handle {
   position: absolute;
   top: 50%;
@@ -708,6 +705,17 @@ a {
 
 .ruler__handle:focus-visible::before {
   box-shadow: 0 0 0 4px var(--accent-22), 0 2px 8px rgb(0 0 0 / 0.5);
+}
+
+/* While dragging, the value must track the finger with no easing. */
+.ruler.is-dragging {
+  cursor: grabbing;
+}
+
+.ruler.is-dragging .ruler__fill,
+.ruler.is-dragging .ruler__handle,
+.ruler.is-dragging .ruler__handle::before {
+  transition: none;
 }
 
 .ticks {
@@ -771,7 +779,7 @@ a {
 .scanner__video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: cover;                 /* #video */
 }
 
 .scanner__overlay {
@@ -780,6 +788,7 @@ a {
   pointer-events: none;
 }
 
+/* Corner-mark viewfinder, drawn as eight gradient bars (no extra markup). */
 .reticle {
   position: absolute;
   inset: 15% 9%;
@@ -848,6 +857,7 @@ a {
   }
 }
 
+/* Status pill over a translucent scrim, clear of the tool column. */
 .scanner__status {
   position: absolute;
   right: 4.5rem;
@@ -864,6 +874,13 @@ a {
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* scanner.js reports failures with onStatus(text, "error"). */
+.scanner__status[data-tone="error"] {
+  border-color: var(--danger-line);
+  background: rgb(28 12 10 / 0.82);
+  color: var(--danger-ink);
 }
 
 .scanner__tools {
@@ -891,12 +908,19 @@ a {
   font-size: 1.05rem;
   line-height: 1;
   transition: background-color 0.16s ease, border-color 0.16s ease,
-    transform 0.12s ease;
+    color 0.16s ease, transform 0.12s ease;
 }
 
 .icon-btn:active {
   transform: scale(0.94);
   background: rgb(29 33 39 / 0.85);
+}
+
+/* Torch engaged. */
+.icon-btn.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 .scan-meta {
@@ -954,6 +978,15 @@ a {
   color: var(--accent);
   font-size: 1.7rem;
   line-height: 1;
+  transition: color 0.16s ease, background-color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+/* app.js toggles is-warn for an already-recorded card. */
+.result.is-warn .result__mark {
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .result__title {
@@ -1073,8 +1106,12 @@ a {
   display: none;
 }
 
-/* Two-column grid: column 1 stacks the row's fields, the last child (the
-   time) sits top-right, right-aligned and muted. */
+/* app.js builds:
+     <li class="list__item">            two-column grid
+       <div class="list__main">           column 1, row 1 (reg no, name)
+       <div class="list__meta">           column 1, row 2 (P1–P3 · 3h)
+       <time class="list__time">          column 2, row 1 (right, muted)
+   The positional rules below are a safety net if that shape ever changes. */
 .list__item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1094,7 +1131,51 @@ a {
   overflow-wrap: anywhere;
 }
 
-.list__item > :first-child {
+.list__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.list__reg {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--t-base);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list__name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list__meta {
+  color: var(--muted);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.list__time {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Safety net: a flat (childless) first cell is the registration number. */
+.list__item > :first-child:not(:has(*)) {
   font-family: var(--font-mono);
   font-size: var(--t-base);
   font-weight: 600;
@@ -1193,6 +1274,12 @@ a {
   border-bottom: 0;
 }
 
+/* The camera the scanner actually opened. */
+.table tr.is-chosen td {
+  background-color: var(--accent-12);
+  color: var(--accent);
+}
+
 .pre {
   max-height: 15rem;
   margin-top: 1rem;
@@ -1253,10 +1340,6 @@ a {
     margin-inline: auto;
     border-inline: 1px solid var(--line);
     box-shadow: 0 40px 90px -50px rgb(0 0 0 / 0.95);
-  }
-
-  .hero {
-    font-size: var(--t-xl);
   }
 
   .stat__value {
@@ -1378,77 +1461,4 @@ a {
     top: 50%;
     opacity: 1;
   }
-}
-
-/* ── 15. State classes and JS-built nodes ──────────────────────────────────
-   These are applied by app.js / scanner.js at runtime rather than present in
-   the initial markup, so they are declared last and explicitly. The list rows
-   are laid out positionally above; these give the inner spans their own
-   identity so a future markup change cannot silently break the row layout. */
-
-.list__main {
-  display: flex;
-  flex-direction: column;
-  gap: 0.05rem;
-  min-width: 0;
-}
-
-.list__reg {
-  font-family: var(--font-mono);
-  font-size: var(--t-base);
-  font-weight: 600;
-  letter-spacing: 0.005em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.list__name {
-  color: var(--muted);
-  font-size: var(--t-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.list__meta {
-  color: var(--ink-2, var(--text));
-  font-size: var(--t-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.list__time {
-  grid-row: 1;
-  grid-column: 2;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--t-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Debug table: the camera the scanner actually opened. */
-.table tr.is-chosen td {
-  background-color: var(--accent-12);
-  color: var(--accent);
-}
-
-/* While a ruler handle is being dragged, kill the transition so it tracks the
-   finger exactly instead of lagging behind it. */
-.ruler.is-dragging .ruler__fill,
-.ruler.is-dragging .ruler__handle {
-  transition: none;
-}
-.ruler.is-dragging { cursor: grabbing; }
-
-/* Torch engaged. */
-.icon-btn.is-on {
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-
-/* Duplicate-scan result. */
-.result.is-warn .result__mark {
-  background-color: var(--warn-dim, var(--accent-12));
-  color: var(--warn, var(--accent));
 }
